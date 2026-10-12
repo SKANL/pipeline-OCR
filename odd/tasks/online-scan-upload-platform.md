@@ -39,9 +39,14 @@ pipeline output quality is measured and improved.
   - Evidence: commit e66d1f8. RED 404 on /uploads -> GREEN 12/12 test_uploads incl. e2e presigned PUT to SeaweedFS + real job on local Mongo (digital PDF, no Mistral). Multipart `/ingest/upload` kept synchronous (ops/local path).
   - Follow-ups (A1 review): commit df43c20 (S3 delete errors logged, S3 redirect test, uv pinned 0.7.10, compose ports on 127.0.0.1).
   - Checks: pytest 122 passed / 22 skipped (MONGODB_URI=mongodb://127.0.0.1:1), 144 passed (local Mongo, DB biblioteca_test dropped); compileall OK.
-- [ ] A4 Auth: verify PWA-minted token, editors collection, protect writes (API key kept for ops scripts).
-- [ ] A5 Book management: PATCH/DELETE book, reprocess.
-- [ ] A6 Rate limiting, upload limits, `/ingest` allowed-root restriction.
+- [x] A4 Auth: verify PWA-minted token, editors collection, protect writes (API key kept for ops scripts).
+  - Evidence: commit a72077e. RED 12/12 test_auth failing (404 /yo, no bearer) -> GREEN. HS256 token (iss biblioteca-web, aud biblioteca-api, <=10 min, 30 s leeway), ADMIN_EMAILS + `editores`, `/yo`, `/editores` admin CRUD, `creado_por` on jobs/books. Security finding: `POST /ingest` admin/ops only (RED editor->200/400, GREEN 403).
+- [x] A5 Book management: PATCH/DELETE book, reprocess.
+  - Evidence: commit c8389d9. RED 3/3 (405/404) -> GREEN. PATCH syncs denormalized page fields; DELETE idempotent incl. jobs, checkpoints, media prefix; reprocesar requeues the existing job with current metadata, 409 when active or pre-queue book.
+- [x] A6 Rate limiting, upload limits, `/ingest` allowed-root restriction.
+  - Evidence: commit fb160a7. RED ImportError app.ratelimit -> GREEN 8/8 test_limits (429 + Retry-After, XFF only with TRUST_PROXY_HEADERS, roots confinement incl. `..` and symlink escape, disabled when unset).
+  - Follow-ups (A2/A3 review): commit c2824bd. RED 5 failing -> GREEN (lease re-check before persist, complete matched_count, PermanentJobError only, no orphan job on 501, failed-upload reopen test).
+  - Checks: pytest 140 passed / 34 skipped (MONGODB_URI=mongodb://127.0.0.1:1, all skips Mongo-unreachable), 174 passed (local Mongo, biblioteca_test); compileall OK.
 - [x] A7 Escape search snippet HTML at the source (security review finding).
   - Evidence: RED 2 snippet escape tests failing -> GREEN; pytest 110 passed 9 skipped (Mongo off), 119 passed with local Mongo test DB. PWA snippetToSafeHtml re-escapes -> visible &amp;lt; / &amp;amp; until a PWA task decodes-or-trusts the API snippet.
 
