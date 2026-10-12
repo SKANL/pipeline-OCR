@@ -160,18 +160,22 @@ def is_permanent(exc: Exception) -> bool:
     return isinstance(exc, (PermanentJobError, OcrPermanentError))
 
 
+def public_error(exc: Exception) -> str:
+    """Message safe to show users; provider/internal detail stays in `error_interno`."""
+    if isinstance(exc, PermanentJobError):
+        return str(exc)
+    if isinstance(exc, OcrNotConfiguredError):
+        return "El libro requiere OCR y el OCR no está disponible en este servidor."
+    if isinstance(exc, OcrPermanentError):
+        return "El servicio de OCR rechazó el documento; prueba con otro proveedor de OCR."
+    return _INTERNAL_ERROR
+
+
 def fail(job: dict, exc: Exception) -> None:
     """Record a failure: retry later with backoff, or `fallido` when exhausted/permanent."""
     now = _now()
     permanent = is_permanent(exc)
-    if isinstance(exc, PermanentJobError):
-        public = str(exc)
-    elif isinstance(exc, OcrNotConfiguredError):
-        public = "El libro requiere OCR y el OCR no está disponible en este servidor."
-    elif isinstance(exc, OcrPermanentError):
-        public = f"Fallo permanente del OCR: {exc}"
-    else:
-        public = _INTERNAL_ERROR
+    public = public_error(exc)
     update = {"error": public, "error_interno": repr(exc)[:2000], "actualizado_en": now,
               "bloqueado_hasta": None}
     if permanent or job["intentos"] >= job["max_intentos"]:

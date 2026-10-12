@@ -49,8 +49,11 @@ def ocr_image(data: bytes, mime: str) -> OcrPage:
         raise OcrRetryableError(f"glm: {exc}") from exc
     if response.status_code != 200:
         raise_for_http(NAME, response.status_code, response.headers, response.text[:500])
-    payload = response.json()
-    details = (payload.get("layout_details") or [[]])[0]
+    try:
+        payload = response.json()
+        details = (payload.get("layout_details") or [[]])[0]
+    except (ValueError, AttributeError, IndexError, TypeError) as exc:
+        raise OcrRetryableError("glm: malformed response payload") from exc
     texto = clean_markdown_text(payload.get("md_results") or "").strip()
     return OcrPage(numero=None, texto=texto, confianza=None, motor=NAME,
                    modelo=settings.glm_ocr_model, bloques=_blocks(details))

@@ -203,3 +203,25 @@ def test_ocr_blocks_without_pdf_points_survive_assembly() -> None:
         pages=ingest._pages_from_extraction([page], []), fuente="imagenes", motor="tesseract",
         modelo="spa+lat", confianza_media=None, origen=["a.png"])
     assert libro["paginas"][0]["bloques"][0]["bbox_norm"] == [0.1, 0.1, 0.2, 0.05]
+
+
+def test_public_job_error_hides_provider_detail() -> None:
+    message = jobs.public_error(ocr.OcrPermanentError("glm: HTTP 401 {'token': 'abc123'}"))
+    assert "abc123" not in message and "glm" not in message
+
+
+def test_glm_malformed_200_payload_is_retryable(monkeypatch) -> None:
+    from app.services import ocr_glm
+
+    monkeypatch.setattr(get_settings(), "glm_api_key", "secret")
+    for bad in (httpx.Response(200, text="<html>"), httpx.Response(200, json=["x"])):
+        monkeypatch.setattr(ocr_glm, "_transport", httpx.MockTransport(lambda r, bad=bad: bad))
+        with pytest.raises(ocr.OcrRetryableError):
+            ocr_glm.ocr_image(b"x", "image/png")
+
+
+def test_tesseract_undecodable_image_is_permanent() -> None:
+    from app.services import ocr_tesseract
+
+    with pytest.raises(ocr.OcrPermanentError):
+        ocr_tesseract.ocr_image(b"not an image", "image/png")

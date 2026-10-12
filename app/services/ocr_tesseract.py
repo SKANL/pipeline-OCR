@@ -32,7 +32,11 @@ def ocr_image(data: bytes, mime: str) -> OcrPage:
     from PIL import Image
 
     lang = get_settings().ocr_langs
-    with Image.open(io.BytesIO(data)) as image:
+    try:
+        image = Image.open(io.BytesIO(data))
+    except (OSError, ValueError) as exc:  # undecodable bytes: retrying won't help
+        raise OcrPermanentError("tesseract: undecodable image") from exc
+    with image:
         width, height = image.size
         words = _image_to_data(image.convert("L"), lang)
 
