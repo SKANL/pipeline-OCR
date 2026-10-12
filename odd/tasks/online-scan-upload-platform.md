@@ -84,3 +84,13 @@ W1-W5 ticked from the PWA git log (commits listed above), not re-verified here b
 - Strategy: feature-branch-chain (user, 2026-10-11). Tracker branch `feat/online-platform` (draft/no-merge PR when pushed).
 - Child branches, each from the previous: `feat/op-01-infra` (I1), `feat/op-02-storage` (A1, A7), `feat/op-03-jobs` (A2, A3), `feat/op-04-auth` (A4, A5, A6), `feat/op-05-pipeline` (P1–P4), PWA repo `feat/op-06..` (W1–W5), `feat/op-09-docs` (D1).
 - Push and PR creation remain the user's decision.
+
+## Round 2 — close gaps (user, 2026-10-12)
+- Mistral diagnosis: key valid, OCR models listed, but `x-ratelimit-limit-req-minute: 0` -> OCR not included in the free plan.
+- Decision: pluggable OCR providers — Tesseract (default, free, in container), Mistral, GLM-OCR (Z.ai); switchable by config at any time; adding a provider = one module + registry entry.
+- Repos: public on github.com/SKANL; agent pushes and merges the chain into main via gh.
+- [ ] F1 OCR provider registry + Tesseract + GLM-OCR + Mistral adapter; Dockerfile tesseract spa/lat; eval per provider.
+- [ ] F2 opendataloader behind a setting (OPENDATALOADER_ENABLED), measured.
+- [ ] F3 PWA search-as-you-type (debounce, abort stale, focus preserved).
+- [ ] F4 `.env.example` both repos complete (API file blocked by user permission rules -> user applies).
+- [ ] F5 Create public repos, push, chained PRs, merge into main, verify main green.
