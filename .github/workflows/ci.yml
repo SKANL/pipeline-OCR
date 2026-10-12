@@ -14,7 +14,6 @@ jobs:
         ports: ["27017:27017"]
     env:
       MONGODB_URI: mongodb://localhost:27017
-      OPENDATALOADER_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
