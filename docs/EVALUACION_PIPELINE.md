@@ -123,3 +123,46 @@ Entre paréntesis, la diferencia con la línea base.
 - **OCR**: Mistral siguió respondiendo 429 en ambas corridas; 0 páginas consumidas. Las filas
   `ocr` y la medición de P3 sobre la foto real quedan pendientes. Las respuestas se guardan en
   caché por página, así que repetir la corrida no gasta páginas de nuevo.
+
+## OCR por proveedor: Tesseract (F1, 2026-10-11)
+
+Corrida local dentro de la imagen Docker (`tesseract-ocr` 5 + `spa` + `lat`, `OCR_LANGS=spa+lat`,
+PDF rasterizado a 300 DPI), sin llamadas remotas:
+`python -m tests.tools.evaluate_corpus --etiqueta tesseract --ocr-proveedor tesseract --solo astete-1787,molinero-1695,ordo-1812,astete-1700-foto`
+(JSON en `docs/evaluacion/tesseract.json`). Mistral (plan sin OCR) y GLM (sin clave) no se corrieron.
+
+| Ítem | Modo | Págs | CER | WER | Recall@10 | MRR | Seg. | Seg. ODL |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| astete-1787 | ocr (Tesseract) | 20 | **0.0904** | **0.1902** | 0.625 | 0.562 | 126.0 | 42.5 |
+| astete-1787 | capa (texto incrustado) | 20 | 0.1061 | 0.2563 | 0.625 | 0.625 | 75.9 | 68.0 |
+| molinero-1695 | ocr (Tesseract) | 5 | n/a | n/a | n/a | n/a | 293.1 | 271.1 |
+| ordo-1812 | ocr (Tesseract) | 5 | n/a | n/a | n/a | n/a | 88.6 | 68.5 |
+| astete-1700-foto | ocr (Tesseract) | 1 | 0.3502 | 0.6341 | n/a | n/a | 2.4 | 0.0 |
+
+Lectura:
+
+- **astete-1787 contra Wikisource**: Tesseract mejora a la capa de texto incrustada del escaneo
+  (CER 0,106 → 0,090; WER 0,256 → 0,190). Mismo recall; el MRR baja (0,625 → 0,562) por un
+  acierto que cae del primer puesto.
+- **Foto real (astete-1700)**: CER 0,35 / WER 0,63: tipografía antigua (s larga, ligaduras)
+  fotografiada; Tesseract no alcanza para esto. Es el caso donde un proveedor remoto (GLM, Mistral)
+  debería compararse cuando haya clave.
+- **Costo**: ~4,0–4,4 s por página (render 300 DPI + Tesseract), restando el tiempo de ODL,
+  en un CPU de escritorio. **Render free (0,1 CPU)**: no medido allí; por escala de CPU esperar
+  del orden de decenas de segundos por página (~40 s), aceptable para una cola en segundo plano
+  pero no para respuesta inmediata. Memoria de Tesseract por página: no medida (un proceso por
+  página, liberado al terminar).
+
+## opendataloader on/off (F2, 2026-10-11)
+
+PDF digital de 3 páginas (`sint-dos-columnas.pdf`), ruta real de trabajo (`jobs._extract_page`
+por página, una JVM por PDF original), local:
+
+| `OPENDATALOADER_ENABLED` | Corrida 1 | Corrida 2 | Bloques ODL | Motor del texto |
+|---|---:|---:|---:|---|
+| `true` | 2,83 s | 1,92 s | 6 | pypdfium2 |
+| `false` | 0,44 s | 0,70 s | 0 | pypdfium2 |
+
+Sin opendataloader el texto, las posiciones de glifos y la indexación no cambian (PDFium); se
+pierden las cajas aproximadas de ODL y los recortes de figuras que dependen de ellas. En libros
+largos el ahorro crece: en esta evaluación ODL pesa 42–297 s por libro escaneado.

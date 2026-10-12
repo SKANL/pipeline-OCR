@@ -12,14 +12,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pymongo.errors import DuplicateKeyError
 
 from app.config import get_settings
 from app.db import jobs_collection
 from app.ratelimit import limit_write
 from app.security import require_editor
-from app.services import jobs
+from app.services import jobs, ocr
 from app.services import storage as storage_service
 from app.services.naming import slugify
 from app.services.storage import safe_filename
@@ -39,6 +39,12 @@ class ArchivoSubida(BaseModel):
 class SubidaRequest(BaseModel):
     archivos: list[ArchivoSubida] = Field(min_length=1, max_length=500)
     metadatos: dict | None = None
+    ocr_proveedor: str | None = None  # None => OCR_PROVIDER
+
+    @field_validator("ocr_proveedor")
+    @classmethod
+    def _known_provider(cls, value: str | None) -> str | None:
+        return ocr.validate_provider(value)
 
 
 def _validate(archivos: list[ArchivoSubida]) -> None:
@@ -95,7 +101,7 @@ def create_upload(payload: SubidaRequest, response: Response, editor: dict = Dep
         ]
         try:
             job_id = jobs.create_job(libro_id=libro_id, archivos=archivos, metadatos=payload.metadatos,
-                                     creado_por=editor["email"])
+                                     creado_por=editor["email"], ocr_proveedor=payload.ocr_proveedor)
         except DuplicateKeyError:  # concurrent identical upload won the race
             existing = jobs_collection().find_one({"sha256": digest})
         else:
@@ -106,6 +112,7 @@ def create_upload(payload: SubidaRequest, response: Response, editor: dict = Dep
         jobs_collection().update_one({"_id": existing["_id"]}, {"$set": {
             "estado": "esperando_subida", "intentos": 0, "error": None,
             "metadatos": payload.metadatos or existing.get("metadatos") or {},
+            "ocr_proveedor": payload.ocr_proveedor,
             "creado_en": datetime.now(timezone.utc)}})
         existing["estado"] = "esperando_subida"
     if existing["estado"] == "esperando_subida":

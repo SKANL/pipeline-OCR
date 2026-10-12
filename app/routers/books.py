@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.config import get_settings
 from app.db import books_collection, job_pages_collection, jobs_collection, pages_collection
@@ -24,6 +24,7 @@ from app.models import (
 )
 from app.ratelimit import limit_write
 from app.security import require_editor
+from app.services import ocr
 from app.services import storage as storage_service
 from app.services.storage import LocalStorage, get_storage, media_url
 from app.services.text import fold_text, make_diacritic_insensitive_pattern
@@ -279,8 +280,17 @@ def delete_book(libro_id: str) -> Response:
     return Response(status_code=204)
 
 
+class ReprocesarRequest(BaseModel):
+    ocr_proveedor: str | None = None  # None => OCR_PROVIDER
+
+    @field_validator("ocr_proveedor")
+    @classmethod
+    def _known_provider(cls, value: str | None) -> str | None:
+        return ocr.validate_provider(value)
+
+
 @router.post("/books/{libro_id}/reprocesar", status_code=202, dependencies=[Depends(limit_write), Depends(require_editor)])
-def reprocess_book(libro_id: str) -> dict:
+def reprocess_book(libro_id: str, payload: ReprocesarRequest | None = None) -> dict:
     """Requeue the book's ingest job from its stored originals, keeping edited metadata."""
     book = books_collection().find_one({"libro_id": libro_id}, {"metadatos": 1})
     if not book:
@@ -295,6 +305,7 @@ def reprocess_book(libro_id: str) -> dict:
         {"$set": {"estado": "pendiente", "intentos": 0, "error": None, "worker_id": None,
                   "bloqueado_hasta": None, "disponible_desde": now, "actualizado_en": now,
                   "metadatos": book.get("metadatos") or {},
+                  "ocr_proveedor": payload.ocr_proveedor if payload else None,
                   "progreso": {"paginas_hechas": 0, "paginas_total": None}}},
     )
     if result.matched_count == 0:

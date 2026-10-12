@@ -1,20 +1,26 @@
-"""Cliente de OCR sobre Mistral Document AI.
+"""OCR facade: one small provider contract + a registry (Tesseract, Mistral, GLM-OCR).
 
-Usa el SDK `mistralai` (`client.ocr.process`). Soporta:
+Provider contract (a module or any object exposing):
 
-- una imagen en bytes o base64 (data URI);
-- una lista de imágenes (una operación por imagen);
-- un PDF (subida -> URL firmada -> `document_url`).
+- `NAME: str` — stored as the page `motor`;
+- `missing_config() -> str | None` — why it cannot run here (None = ready);
+- `ocr_image(data: bytes, mime: str) -> OcrPage` — one page image;
+- optional `ocr_pdf(path) -> list[OcrPage]` — native PDF path (Mistral);
+  without it the facade renders each PDF page to PNG and calls `ocr_image`.
 
-Devuelve, por página, el texto (markdown), la confianza si la API la
-expone y el motor/modelo usados. Todo el acceso a red es defensivo: ante un
-fallo se lanza `RuntimeError` (o `OcrNotConfiguredError` si falta la API
-key) con contexto para que la ingesta lo registre en `errors[]`.
+Adding a provider: write `app/services/ocr_<name>.py` with that contract,
+add one line to `PROVIDERS`, add its settings to `config.py`.
+
+The active provider is `OCR_PROVIDER`, overridable per job with
+`use_provider(name)` (the job's `ocr_proveedor`).
 """
 
 from __future__ import annotations
 
 import base64
+import importlib
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,30 +33,36 @@ IMAGE_SUFFIXES = {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
 }
-MOTOR = "mistral"
 
 
-class OcrNotConfiguredError(RuntimeError):
-    """No hay API key de Mistral pero la fuente exige OCR."""
+class OcrPermanentError(RuntimeError):
+    """Retrying cannot help (bad key, plan without OCR, rejected input)."""
+
+
+class OcrNotConfiguredError(OcrPermanentError):
+    """The active provider is not usable on this server but the source needs OCR."""
+
+
+class OcrRetryableError(RuntimeError):
+    """Transient provider failure (rate limit, 5xx, network)."""
 
 
 @dataclass
 class OcrPage:
-    """Una página devuelta por OCR."""
+    """One OCR'd page. `bloques` carry `bbox_norm` = [nx, ny, nw, nh], top-left origin."""
 
     numero: int | None
     texto: str
     confianza: float | None = None
-    motor: str = MOTOR
+    motor: str = ""
     modelo: str | None = None
+    bloques: list[dict] = field(default_factory=list)
 
 
 @dataclass
 class OcrResult:
-    """Resultado completo de una corrida de OCR."""
-
     paginas: list[OcrPage] = field(default_factory=list)
-    motor: str = MOTOR
+    motor: str | None = None
     modelo: str | None = None
 
     @property
@@ -59,142 +71,133 @@ class OcrResult:
         return sum(values) / len(values) if values else None
 
 
+def _lazy(module: str):
+    return lambda: importlib.import_module(f"app.services.{module}")
+
+
+# Registry: name -> factory returning the provider.
+PROVIDERS = {
+    "tesseract": _lazy("ocr_tesseract"),
+    "mistral": _lazy("ocr_mistral"),
+    "glm": _lazy("ocr_glm"),
+}
+
+_override: ContextVar[str | None] = ContextVar("ocr_provider_override", default=None)
+
+
+def validate_provider(name: str | None) -> str | None:
+    """Normalize an optional provider name; ValueError if not registered."""
+    if name is None or name == "":
+        return None
+    if name not in PROVIDERS:
+        raise ValueError(f"Proveedor de OCR desconocido: {name} (admitidos: {', '.join(PROVIDERS)}).")
+    return name
+
+
+def provider_name() -> str:
+    return _override.get() or get_settings().ocr_provider
+
+
+@contextmanager
+def use_provider(name: str | None):
+    """Run a block with another provider (None keeps the configured one)."""
+    token = _override.set(validate_provider(name))
+    try:
+        yield
+    finally:
+        _override.reset(token)
+
+
+def get_provider():
+    name = provider_name()
+    if name not in PROVIDERS:
+        raise OcrNotConfiguredError(f"OCR_PROVIDER desconocido: {name}")
+    return PROVIDERS[name]()
+
+
 def is_configured() -> bool:
-    """True si hay API key de Mistral configurada."""
-    return bool(get_settings().mistral_api_key)
+    try:
+        return get_provider().missing_config() is None
+    except OcrNotConfiguredError:
+        return False
 
 
-def _client():
-    """Construye un cliente Mistral, validando la API key."""
-    settings = get_settings()
-    if not settings.mistral_api_key:
-        raise OcrNotConfiguredError(
-            "MISTRAL_API_KEY no está configurada; no se puede ejecutar OCR."
-        )
-    try:  # mistralai >= 2 expone el cliente bajo `mistralai.client`
-        from mistralai.client import Mistral
-    except ImportError:  # mistralai 1.x lo exponía en la raíz
-        from mistralai import Mistral
-
-    return Mistral(api_key=settings.mistral_api_key)
+def require_configured():
+    provider = get_provider()
+    reason = provider.missing_config()
+    if reason:
+        raise OcrNotConfiguredError(f"OCR '{provider.NAME}' no disponible: {reason}")
+    return provider
 
 
-def _page_confidence(page) -> float | None:
-    """Lee la confianza de la página si la API la provee."""
-    for attr in ("confidence", "ocr_confidence", "score"):
-        value = getattr(page, attr, None)
-        if isinstance(value, (int, float)):
-            return float(value)
-    return None
+def raise_for_http(provider: str, status: int | None, headers, detail: str) -> None:
+    """Map an HTTP failure to permanent vs retryable (shared by HTTP providers)."""
+    headers = {str(k).lower(): str(v) for k, v in dict(headers or {}).items()}
+    if status == 429 and headers.get("x-ratelimit-limit-req-minute") == "0":
+        raise OcrPermanentError(f"{provider}: plan sin OCR habilitado (límite 0 req/min). {detail}")
+    if status in (400, 401, 403, 404, 413, 422):
+        raise OcrPermanentError(f"{provider}: HTTP {status}: {detail}")
+    raise OcrRetryableError(f"{provider}: HTTP {status}: {detail}")
 
 
-def _to_pages(response, modelo: str) -> list[OcrPage]:
-    """Extrae las páginas (texto/confianza) de una respuesta OCR."""
-    pages = getattr(response, "pages", None) or []
-    result: list[OcrPage] = []
-    for position, page in enumerate(pages, start=1):
-        texto = getattr(page, "markdown", None)
-        if not texto:
-            texto = getattr(page, "text", "") or ""
-        index = getattr(page, "index", None)
-        numero = index + 1 if isinstance(index, int) else position
-        result.append(
-            OcrPage(
-                numero=numero,
-                texto=texto,
-                confianza=_page_confidence(page),
-                motor=MOTOR,
-                modelo=modelo,
-            )
-        )
-    return result
+def _result(pages: list[OcrPage]) -> OcrResult:
+    first = pages[0] if pages else None
+    return OcrResult(paginas=pages, motor=first.motor if first else None, modelo=first.modelo if first else None)
 
 
 def ocr_image_bytes(data: bytes, mime: str = "image/png") -> OcrResult:
-    """Ejecuta OCR sobre una imagen en bytes (data URI base64)."""
-    settings = get_settings()
-    client = _client()
-    encoded = base64.b64encode(data).decode("ascii")
-    document = {"type": "image_url", "image_url": f"data:{mime};base64,{encoded}"}
-    try:
-        response = client.ocr.process(model=settings.mistral_ocr_model, document=document)
-    except Exception as exc:  # defensivo ante errores de red o API
-        raise RuntimeError(f"Error de OCR (imagen): {exc}") from exc
-    return OcrResult(paginas=_to_pages(response, settings.mistral_ocr_model), modelo=settings.mistral_ocr_model)
+    return _result([require_configured().ocr_image(data, mime)])
 
 
 def ocr_image_base64(data_b64: str, mime: str = "image/png") -> OcrResult:
-    """Ejecuta OCR sobre una imagen codificada en base64."""
     return ocr_image_bytes(base64.b64decode(data_b64), mime=mime)
 
 
 def ocr_image_file(path: str | Path) -> OcrResult:
-    """Ejecuta OCR sobre un archivo de imagen en disco."""
     path = Path(path)
     mime = IMAGE_SUFFIXES.get(path.suffix.lower())
     if not mime:
-        raise RuntimeError(f"Extensión de imagen no soportada: {path.name}")
+        raise OcrPermanentError(f"Extensión de imagen no soportada: {path.name}")
     return ocr_image_bytes(path.read_bytes(), mime=mime)
 
 
 def ocr_images(paths) -> OcrResult:
-    """Ejecuta OCR sobre varias imágenes en orden natural."""
+    """OCR several images in natural order (pages renumbered 1..n)."""
     ordered = sorted((Path(p) for p in paths), key=lambda p: natural_key(p.name))
-    paginas: list[OcrPage] = []
-    modelo: str | None = None
+    pages: list[OcrPage] = []
     for path in ordered:
-        result = ocr_image_file(path)
-        modelo = result.modelo
-        for page in result.paginas:
-            page.numero = len(paginas) + 1
-            paginas.append(page)
-    return OcrResult(paginas=paginas, modelo=modelo)
-
-
-def ocr_pdf_bytes(data: bytes, filename: str = "documento.pdf") -> OcrResult:
-    """Sube un PDF y ejecuta OCR sobre su URL firmada."""
-    settings = get_settings()
-    client = _client()
-    try:
-        uploaded = client.files.upload(
-            file={"file_name": filename, "content": data}, purpose="ocr"
-        )
-        signed = client.files.get_signed_url(file_id=uploaded.id)
-        document = {"type": "document_url", "document_url": signed.url}
-        response = client.ocr.process(model=settings.mistral_ocr_model, document=document)
-    except Exception as exc:  # defensivo ante errores de red o API
-        raise RuntimeError(f"Error de OCR (PDF): {exc}") from exc
-    return OcrResult(paginas=_to_pages(response, settings.mistral_ocr_model), modelo=settings.mistral_ocr_model)
+        for page in ocr_image_file(path).paginas:
+            page.numero = len(pages) + 1
+            pages.append(page)
+    return _result(pages)
 
 
 def ocr_pdf_file(path: str | Path) -> OcrResult:
-    """Ejecuta OCR sobre un PDF en disco."""
+    """OCR a scanned PDF: native provider path, else render each page to PNG."""
+    from app.services import render
+
     path = Path(path)
-    return ocr_pdf_bytes(path.read_bytes(), filename=path.name)
+    provider = require_configured()
+    if hasattr(provider, "ocr_pdf"):
+        return _result(provider.ocr_pdf(path))
+    dpi = get_settings().ocr_dpi
+    pages = []
+    for index in range(render.pdf_page_count(path)):
+        page = provider.ocr_image(render.render_pdf_page(path, index, dpi=dpi), "image/png")
+        page.numero = index + 1
+        pages.append(page)
+    return _result(pages)
 
 
 def run_ocr_for_book(book_dir: Path) -> list[str]:
-    """Compatibilidad: OCR sobre `imagenes/` (orden natural) o `documento.pdf`.
-
-    Devuelve la lista de textos de página. Lanza `RuntimeError` si no hay
-    fuente OCR o si la API falla.
-    """
+    """Compatibility: OCR `documento.pdf` or `imagenes/` (natural order)."""
     book_dir = Path(book_dir)
-    imagenes_dir = book_dir / "imagenes"
-    pdf_path = book_dir / "documento.pdf"
-
+    pdf_path, imagenes_dir = book_dir / "documento.pdf", book_dir / "imagenes"
     if pdf_path.exists():
         return [p.texto for p in ocr_pdf_file(pdf_path).paginas]
-
     if imagenes_dir.exists():
-        image_paths = [
-            p for p in imagenes_dir.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES
-        ]
-        result = ocr_images(image_paths)
+        result = ocr_images([p for p in imagenes_dir.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES])
         if result.paginas:
             return [p.texto for p in result.paginas]
         raise RuntimeError(f"No se encontraron imágenes válidas en {imagenes_dir}")
-
-    raise RuntimeError(
-        f"OCR solicitado pero el libro no tiene 'imagenes/' ni 'documento.pdf': {book_dir}"
-    )
+    raise RuntimeError(f"OCR solicitado pero el libro no tiene 'imagenes/' ni 'documento.pdf': {book_dir}")

@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     mongodb_db: str = "biblioteca"
     mistral_api_key: str = ""
     mistral_ocr_model: str = "mistral-ocr-latest"
+    ocr_provider: str = "tesseract"  # tesseract | mistral | glm (registry in services/ocr.py)
+    ocr_langs: str = "spa+lat"  # Tesseract languages
+    ocr_dpi: int = 300  # PDF page render resolution sent to image-only OCR providers
+    glm_api_key: str = ""
+    glm_ocr_model: str = "glm-ocr"
+    glm_api_base_url: str = "https://api.z.ai/api/paas/v4"
+    opendataloader_enabled: bool = True  # Java layout helper; false => PDFium only (Render free)
     media_root: str = "./_media"
     # Almacenamiento S3-compatible (R2 / SeaweedFS); vacío => backend local MEDIA_ROOT
     s3_endpoint_url: str = ""

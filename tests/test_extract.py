@@ -46,9 +46,10 @@ def test_scanned_pdf_routes_to_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
         "ocr_pdf_file",
         lambda path: OcrResult(
             paginas=[
-                OcrPage(numero=1, texto="pagina uno", confianza=0.8, modelo="mistral-ocr-latest"),
-                OcrPage(numero=2, texto="pagina dos", confianza=0.6, modelo="mistral-ocr-latest"),
+                OcrPage(numero=1, texto="pagina uno", confianza=0.8, motor="mistral", modelo="mistral-ocr-latest"),
+                OcrPage(numero=2, texto="pagina dos", confianza=0.6, motor="mistral", modelo="mistral-ocr-latest"),
             ],
+            motor="mistral",
             modelo="mistral-ocr-latest",
         ),
     )

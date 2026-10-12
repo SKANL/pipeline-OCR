@@ -10,7 +10,7 @@ API instance drains it:
 - heartbeat: after every page the lease is extended and `progreso` updated;
   a worker that lost its lease stops (`LeaseLost`).
 - retries: transient errors go back to `pendiente` with exponential backoff
-  plus jitter; only `PermanentJobError`/`OcrNotConfiguredError` are permanent; after
+  plus jitter; only `PermanentJobError`/`OcrPermanentError` are permanent; after
   `max_intentos` the job is `fallido` with a public-safe `error`.
 - checkpoints: every finished page is stored in `trabajo_paginas`, so a retry
   skips pages already done; the book is assembled and persisted at the end.
@@ -38,7 +38,8 @@ from app.db import books_collection, job_pages_collection, jobs_collection
 from app.services import ingest, pdf_classify, render, structure
 from app.services import storage as storage_service
 from app.services.extract import FUENTE_PDF_ESCANEADO, FUENTE_TEXTO
-from app.services.ocr import OcrNotConfiguredError
+from app.services import ocr
+from app.services.ocr import OcrNotConfiguredError, OcrPermanentError
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,8 @@ def upload_digest(sha256s: list[str]) -> str:
 
 
 def create_job(*, libro_id: str, archivos: list[dict], metadatos: dict | None,
-               estado: str = "esperando_subida", creado_por: str | None = None) -> str:
+               estado: str = "esperando_subida", creado_por: str | None = None,
+               ocr_proveedor: str | None = None) -> str:
     """Insert a job; `archivos` carry nombre/tipo_contenido/tamano/sha256/clave."""
     now = _now()
     result = jobs_collection().insert_one({
@@ -94,6 +96,7 @@ def create_job(*, libro_id: str, archivos: list[dict], metadatos: dict | None,
         "libro_id": libro_id,
         "archivos": archivos,
         "metadatos": metadatos or {},
+        "ocr_proveedor": ocr_proveedor,
         "sha256": upload_digest([a["sha256"] for a in archivos]),
         "intentos": 0,
         "max_intentos": MAX_INTENTOS,
@@ -152,16 +155,27 @@ def heartbeat(job: dict, *, paginas_hechas: int, paginas_total: int) -> None:
         raise LeaseLost(str(job["_id"]))
 
 
+def is_permanent(exc: Exception) -> bool:
+    """Bad input or unusable OCR provider: retrying cannot help."""
+    return isinstance(exc, (PermanentJobError, OcrPermanentError))
+
+
+def public_error(exc: Exception) -> str:
+    """Message safe to show users; provider/internal detail stays in `error_interno`."""
+    if isinstance(exc, PermanentJobError):
+        return str(exc)
+    if isinstance(exc, OcrNotConfiguredError):
+        return "El libro requiere OCR y el OCR no está disponible en este servidor."
+    if isinstance(exc, OcrPermanentError):
+        return "El servicio de OCR rechazó el documento; prueba con otro proveedor de OCR."
+    return _INTERNAL_ERROR
+
+
 def fail(job: dict, exc: Exception) -> None:
     """Record a failure: retry later with backoff, or `fallido` when exhausted/permanent."""
     now = _now()
-    permanent = isinstance(exc, (PermanentJobError, OcrNotConfiguredError))
-    if isinstance(exc, PermanentJobError):
-        public = str(exc)
-    elif isinstance(exc, OcrNotConfiguredError):
-        public = "El libro requiere OCR y el OCR no está disponible en este servidor."
-    else:
-        public = _INTERNAL_ERROR
+    permanent = is_permanent(exc)
+    public = public_error(exc)
     update = {"error": public, "error_interno": repr(exc)[:2000], "actualizado_en": now,
               "bloqueado_hasta": None}
     if permanent or job["intentos"] >= job["max_intentos"]:
@@ -251,6 +265,12 @@ def _extract_page(kind: str, path: Path, local: int, numero: int, libro_id: str,
 
 
 def process(job: dict) -> int:
+    """Process a claimed job under its OCR provider (`ocr_proveedor`, else OCR_PROVIDER)."""
+    with ocr.use_provider(job.get("ocr_proveedor")):
+        return _process_pages(job)
+
+
+def _process_pages(job: dict) -> int:
     """Process a claimed job page by page with checkpoints; return the page count."""
     storage = storage_service.get_storage()
     archivos = job["archivos"]

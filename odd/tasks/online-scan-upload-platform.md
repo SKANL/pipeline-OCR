@@ -89,8 +89,10 @@ W1-W5 ticked from the PWA git log (commits listed above), not re-verified here b
 - Mistral diagnosis: key valid, OCR models listed, but `x-ratelimit-limit-req-minute: 0` -> OCR not included in the free plan.
 - Decision: pluggable OCR providers — Tesseract (default, free, in container), Mistral, GLM-OCR (Z.ai); switchable by config at any time; adding a provider = one module + registry entry.
 - Repos: public on github.com/SKANL; agent pushes and merges the chain into main via gh.
-- [ ] F1 OCR provider registry + Tesseract + GLM-OCR + Mistral adapter; Dockerfile tesseract spa/lat; eval per provider.
-- [ ] F2 opendataloader behind a setting (OPENDATALOADER_ENABLED), measured.
+- [x] F1 OCR provider registry + Tesseract + GLM-OCR + Mistral adapter; Dockerfile tesseract spa/lat; eval per provider.
+  Route: delegated writer. Evidence: tests/test_ocr_providers.py (RED observed, then GREEN; real-binary test skips on Windows), commits 6597f9e, f4b5df0, cdecf9d + docs commit; docker build OK; Tesseract eval in Docker: astete-1787 CER 0.0904 / WER 0.1902 (embedded layer 0.1061 / 0.2563), ~4 s/page local. GLM verified against docs.z.ai layout_parsing, mocked only (no key). Mistral 429 with limit 0 -> permanent.
+- [x] F2 opendataloader behind a setting (OPENDATALOADER_ENABLED), measured.
+  Evidence: tests/test_opendataloader_toggle.py (RED then GREEN), commit 45b48ed; 3-page digital PDF on 2.83/1.92 s vs off 0.44/0.70 s; default true locally, false in render.yaml.
 - [ ] F3 PWA search-as-you-type (debounce, abort stale, focus preserved).
 - [ ] F4 `.env.example` both repos complete (API file blocked by user permission rules -> user applies).
 - [ ] F5 Create public repos, push, chained PRs, merge into main, verify main green.
