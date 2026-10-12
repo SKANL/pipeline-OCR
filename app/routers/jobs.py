@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, field_validator
 from pymongo.errors import DuplicateKeyError
 
@@ -34,6 +34,7 @@ class ArchivoSubida(BaseModel):
     tipo_contenido: str
     tamano: int = Field(gt=0)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    titulo: str | None = Field(default=None, max_length=300)  # PDF/TXT: title of its own book
 
 
 class SubidaRequest(BaseModel):
@@ -58,8 +59,8 @@ def _validate(archivos: list[ArchivoSubida]) -> None:
     if sum(a.tamano for a in archivos) > settings.max_upload_bytes:
         raise HTTPException(413, f"La subida supera el límite de {settings.max_upload_bytes} bytes.")
     if len({jobs.CONTENT_TYPES[a.tipo_contenido][0] for a in archivos}) > 1:
-        raise HTTPException(422, "Todos los archivos de un libro deben ser del mismo tipo "
-                                 "(un PDF o varios, imágenes, o texto).")
+        raise HTTPException(422, "No se pueden mezclar imágenes con documentos (PDF o texto) "
+                                 "en una misma subida.")
 
 
 def _presigned(job: dict, storage) -> dict:
@@ -68,10 +69,7 @@ def _presigned(job: dict, storage) -> dict:
     except NotImplementedError as exc:
         raise HTTPException(501, str(exc)) from exc
     return {
-        "id": str(job["_id"]),
-        "estado": job["estado"],
-        "libro_id": job["libro_id"],
-        "existente": False,
+        **_entry(job, existente=False),
         "expira_en": (datetime.now(timezone.utc) + timedelta(seconds=PUT_EXPIRY)).isoformat(),
         "archivos": [
             {"nombre": a["nombre"], "clave": a["clave"], "url": url, "metodo": "PUT",
@@ -81,27 +79,32 @@ def _presigned(job: dict, storage) -> dict:
     }
 
 
-@router.post("/uploads", status_code=201, dependencies=[Depends(limit_write)])
-def create_upload(payload: SubidaRequest, response: Response, editor: dict = Depends(require_editor)) -> dict:
-    """Devuelve URLs PUT firmadas, o el trabajo/libro existente si el contenido ya se subió."""
-    _validate(payload.archivos)
-    storage = storage_service.get_storage()
-    if isinstance(storage, storage_service.LocalStorage):  # cannot presign: fail before creating a job
-        raise HTTPException(501, "Presigned uploads require the S3 backend (S3_ENDPOINT_URL).")
-    digest = jobs.upload_digest([a.sha256 for a in payload.archivos])
+def _entry(job: dict, *, existente: bool) -> dict:
+    return {"id": str(job["_id"]), "titulo": jobs.public_status(job)["titulo"], "estado": job["estado"],
+            "etapa": jobs.etapa_of(job), "libro_id": job["libro_id"], "existente": existente,
+            "expira_en": None, "archivos": []}
+
+
+def _clean_title(nombre: str) -> str:
+    return " ".join(Path(nombre).stem.replace("_", " ").replace("-", " ").split()) or "libro"
+
+
+def _upload_job(archivos_in: list[ArchivoSubida], titulo: str, metadatos: dict, editor: dict,
+                ocr_proveedor: str | None, storage) -> dict:
+    """Create (or reuse, by content sha256) one job = one book, and its presigned PUTs."""
+    digest = jobs.upload_digest([a.sha256 for a in archivos_in])
     existing = jobs_collection().find_one({"sha256": digest})
 
     if existing is None:
-        stem = (payload.metadatos or {}).get("titulo") or Path(payload.archivos[0].nombre).stem
-        libro_id = f"{slugify(str(stem)) or 'libro'}-{digest[:8]}"
+        libro_id = f"{slugify(titulo) or 'libro'}-{digest[:8]}"
         archivos = [
-            {**a.model_dump(),
+            {**a.model_dump(exclude={"titulo"}),
              "clave": f"{libro_id}/{i:03d}-{safe_filename(Path(a.nombre).stem)}{jobs.CONTENT_TYPES[a.tipo_contenido][1]}"}
-            for i, a in enumerate(payload.archivos)
+            for i, a in enumerate(archivos_in)
         ]
         try:
-            job_id = jobs.create_job(libro_id=libro_id, archivos=archivos, metadatos=payload.metadatos,
-                                     creado_por=editor["email"], ocr_proveedor=payload.ocr_proveedor)
+            job_id = jobs.create_job(libro_id=libro_id, archivos=archivos, metadatos=metadatos, titulo=titulo,
+                                     creado_por=editor["email"], ocr_proveedor=ocr_proveedor)
         except DuplicateKeyError:  # concurrent identical upload won the race
             existing = jobs_collection().find_one({"sha256": digest})
         else:
@@ -109,18 +112,41 @@ def create_upload(payload: SubidaRequest, response: Response, editor: dict = Dep
 
     if existing["estado"] == "fallido":
         # Same bytes again: retry from scratch (checkpoints stay valid, same sha256).
-        jobs_collection().update_one({"_id": existing["_id"]}, {"$set": {
-            "estado": "esperando_subida", "intentos": 0, "error": None,
-            "metadatos": payload.metadatos or existing.get("metadatos") or {},
-            "ocr_proveedor": payload.ocr_proveedor,
-            "creado_en": datetime.now(timezone.utc)}})
-        existing["estado"] = "esperando_subida"
+        reset = {"estado": "esperando_subida", "etapa": "subiendo", "intentos": 0, "error": None,
+                 "metadatos": metadatos or existing.get("metadatos") or {}, "titulo": titulo,
+                 "ocr_proveedor": ocr_proveedor, "creado_en": datetime.now(timezone.utc)}
+        jobs_collection().update_one({"_id": existing["_id"]}, {"$set": reset})
+        existing.update(reset)
     if existing["estado"] == "esperando_subida":
         return _presigned(existing, storage)
+    return _entry(existing, existente=True)
 
-    response.status_code = status.HTTP_200_OK
-    return {"id": str(existing["_id"]), "estado": existing["estado"], "libro_id": existing["libro_id"],
-            "existente": True, "expira_en": None, "archivos": []}
+
+@router.post("/uploads", status_code=201, dependencies=[Depends(limit_write)])
+def create_upload(payload: SubidaRequest, response: Response, editor: dict = Depends(require_editor)) -> dict:
+    """PDF/TXT: un trabajo (libro) por archivo; imágenes: un libro con las páginas en orden.
+
+    Devuelve `trabajos` (cada uno con sus URLs PUT firmadas, o `existente` si ese
+    contenido ya se subió); `id`/`archivos`/... de nivel superior = el primer trabajo.
+    """
+    _validate(payload.archivos)
+    storage = storage_service.get_storage()
+    if isinstance(storage, storage_service.LocalStorage):  # cannot presign: fail before creating a job
+        raise HTTPException(501, "Presigned uploads require the S3 backend (S3_ENDPOINT_URL).")
+    metadatos = dict(payload.metadatos or {})
+    single = len(payload.archivos) == 1
+    if jobs.CONTENT_TYPES[payload.archivos[0].tipo_contenido][0] == "image":
+        titulo = str(metadatos.get("titulo") or _clean_title(payload.archivos[0].nombre))
+        groups = [(payload.archivos, titulo)]
+    else:
+        groups = [([a], a.titulo or (single and metadatos.get("titulo")) or _clean_title(a.nombre))
+                  for a in payload.archivos]
+    trabajos = [_upload_job(archivos, str(titulo), {**metadatos, "titulo": str(titulo)}, editor,
+                            payload.ocr_proveedor, storage)
+                for archivos, titulo in groups]
+    if all(t["existente"] for t in trabajos):
+        response.status_code = status.HTTP_200_OK
+    return {**trabajos[0], "trabajos": trabajos}
 
 
 @router.post("/uploads/{upload_id}/completar", status_code=202, dependencies=[Depends(limit_write), Depends(require_editor)])
@@ -140,10 +166,18 @@ def complete_upload(upload_id: str) -> dict:
                                          f"con el declarado ({archivo['tamano']}).")
         jobs_collection().update_one(
             {"_id": job["_id"], "estado": "esperando_subida"},
-            {"$set": {"estado": "pendiente", "disponible_desde": datetime.now(timezone.utc)}},
+            {"$set": {"estado": "pendiente", "etapa": "en_espera", "disponible_desde": datetime.now(timezone.utc)}},
         )
         job = jobs.get_job(upload_id)
     return {"trabajo_id": str(job["_id"]), "estado": job["estado"]}
+
+
+@router.get("/trabajos")
+def list_jobs(limit: int = Query(20, ge=1, le=100), editor: dict = Depends(require_editor)) -> list[dict]:
+    """Trabajos recientes del editor (admin: todos), del más nuevo al más viejo."""
+    query = {} if editor["rol"] == "admin" else {"creado_por": editor["email"]}
+    cursor = jobs_collection().find(query).sort([("creado_en", -1), ("_id", -1)]).limit(limit)
+    return [jobs.public_status(job) for job in cursor]
 
 
 @router.get("/trabajos/{job_id}")
@@ -152,13 +186,4 @@ def get_job_status(job_id: str) -> dict:
     job = jobs.get_job(job_id)
     if job is None:
         raise HTTPException(404, f"Trabajo no encontrado: {job_id}")
-    return {
-        "id": str(job["_id"]),
-        "estado": job["estado"],
-        "progreso": job.get("progreso"),
-        "intentos": job.get("intentos", 0),
-        "error": job.get("error"),
-        "libro_id": job["libro_id"] if job["estado"] == "completado" else None,
-        "creado_en": job.get("creado_en"),
-        "actualizado_en": job.get("actualizado_en"),
-    }
+    return jobs.public_status(job)

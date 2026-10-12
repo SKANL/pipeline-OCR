@@ -11,7 +11,7 @@ and the editor saw no visible progress, so they could not tell whether processin
 - "Mis subidas" page lists the editor's recent uploads with their step; job state survives closing the tab.
 
 ## Tasks
-- [ ] U1 API: job `etapa` field + progress per step; split PDF/TXT uploads into one job per file; `GET /trabajos` (mine, recent) for editors.
+- [x] U1 API: job `etapa` field + progress per step; split PDF/TXT uploads into one job per file; `GET /trabajos` (mine, recent) for editors.
 - [ ] U2 PWA: per-file titles for multi-document uploads; step tracker on the job page and right after upload; "Mis subidas" list with polling.
 
 ## Checks

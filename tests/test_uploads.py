@@ -222,3 +222,90 @@ def test_failed_upload_is_reopened_for_the_same_bytes(queue, s3) -> None:
     assert again.json()["id"] == upload["id"] and again.json()["archivos"]
     doc = jobs.get_job(upload["id"])
     assert (doc["estado"], doc["intentos"], doc["error"], doc["metadatos"]) == ("esperando_subida", 0, None, {"titulo": "Nuevo"})
+
+
+def _status(job_id: str) -> dict:
+    return client.get(f"/api/v1/trabajos/{job_id}").json()
+
+
+@needs_mongo
+def test_multi_document_upload_creates_one_job_per_file(queue, s3) -> None:
+    a, b = _pdf_bytes(1), _pdf_bytes(2)
+    body = {"archivos": [{**_file("mi_libro-uno.pdf", a, "application/pdf")},
+                         {**_file("dos.pdf", b, "application/pdf"), "titulo": "Libro Dos"}],
+            "metadatos": {"autor": "Agustín"}}
+    created = client.post("/api/v1/uploads", json=body)
+    assert created.status_code == 201, created.text
+    upload = created.json()
+    trabajos = upload["trabajos"]
+    assert [t["titulo"] for t in trabajos] == ["mi libro uno", "Libro Dos"]
+    assert len({t["id"] for t in trabajos}) == 2 and len({t["libro_id"] for t in trabajos}) == 2
+    assert all(t["existente"] is False and len(t["archivos"]) == 1 for t in trabajos)
+    assert upload["id"] == trabajos[0]["id"] and upload["archivos"] == trabajos[0]["archivos"]
+    status = _status(trabajos[1]["id"])
+    assert (status["etapa"], status["titulo"]) == ("subiendo", "Libro Dos")
+    assert jobs.get_job(trabajos[1]["id"])["metadatos"] == {"autor": "Agustín", "titulo": "Libro Dos"}
+
+    again = client.post("/api/v1/uploads", json=body).json()
+    assert [t["id"] for t in again["trabajos"]] == [t["id"] for t in trabajos]
+
+
+def test_mixed_images_and_documents_are_rejected() -> None:
+    body = {"archivos": [_file("a.pdf", b"x", "application/pdf"), _file("b.png", b"y", "image/png")]}
+    response = client.post("/api/v1/uploads", json=body)
+    assert response.status_code == 422 and "imágenes" in response.json()["detail"]
+
+
+@needs_mongo
+def test_job_etapa_follows_the_worker(queue, s3, monkeypatch) -> None:
+    from app.services import ingest
+
+    data = "uno\fdos".encode()
+    upload = client.post("/api/v1/uploads", json={"archivos": [_file("e.txt", data, "text/plain")]}).json()
+    assert _status(upload["id"])["etapa"] == "subiendo"
+    s3.put(upload["archivos"][0]["clave"], data, "text/plain")
+    client.post(f"/api/v1/uploads/{upload['id']}/completar")
+    assert _status(upload["id"])["etapa"] == "en_espera"
+
+    seen = []
+    persist = ingest._persist
+    monkeypatch.setattr(ingest, "_persist", lambda *a, **k: (seen.append(_status(upload["id"])["etapa"]),
+                                                               persist(*a, **k)))
+    jobs.run_once("w-etapa")
+    assert seen == ["preparando_busqueda"]
+    status = _status(upload["id"])
+    assert (status["etapa"], status["libro_id"], status["titulo"]) == ("disponible", upload["libro_id"], "e")
+
+
+@needs_mongo
+def test_etapa_for_failures_and_old_jobs(queue, s3) -> None:
+    from app.db import jobs_collection
+
+    upload = client.post("/api/v1/uploads", json={"archivos": [_file("v.txt", b"v", "text/plain")]}).json()
+    job = jobs_collection().find_one_and_update({}, {"$set": {"estado": "procesando", "worker_id": "w", "intentos": 1}},
+                                                return_document=True)
+    jobs.fail(job, ValueError("boom"))
+    assert _status(upload["id"])["etapa"] == "en_espera"
+    jobs_collection().update_one({}, {"$set": {"estado": "procesando"}})
+    jobs.fail({**job, "intentos": 5}, jobs.PermanentJobError("Archivo dañado."))
+    assert (_status(upload["id"])["etapa"], _status(upload["id"])["error"]) == ("fallido", "Archivo dañado.")
+    jobs_collection().update_one({}, {"$unset": {"etapa": ""}, "$set": {"estado": "procesando"}})
+    assert _status(upload["id"])["etapa"] == "leyendo_paginas"
+
+
+@needs_mongo
+def test_list_recent_jobs_by_owner(queue, s3) -> None:
+    from app.security import require_editor
+
+    for i in range(3):
+        client.post("/api/v1/uploads", json={"archivos": [_file(f"l{i}.txt", f"t{i}".encode(), "text/plain")]})
+    listed = client.get("/api/v1/trabajos?limit=2")
+    assert listed.status_code == 200
+    assert [t["titulo"] for t in listed.json()] == ["l2", "l1"]
+    assert set(listed.json()[0]) >= {"id", "etapa", "titulo", "creado_en"} and "archivos" not in listed.json()[0]
+
+    app.dependency_overrides[require_editor] = lambda: {"email": "otra@x.org", "rol": "editor"}
+    try:
+        assert client.get("/api/v1/trabajos").json() == []
+    finally:
+        app.dependency_overrides.clear()
