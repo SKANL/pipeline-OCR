@@ -539,6 +539,7 @@ def _pdf_verification(
     storage: Storage,
     native_by_path: dict | None = None,
     first_page: int = 1,
+    structures: dict | None = None,
 ) -> tuple[
     list[str | None],
     dict[int, list[dict]],
@@ -559,7 +560,7 @@ def _pdf_verification(
     figuras_por_pagina: dict[int, list[dict]] = {}
     offset = first_page - 1
     for pdf_path in pdf_paths:
-        arch = structure.extract_structure(pdf_path)
+        arch = structures[pdf_path] if structures and pdf_path in structures else structure.extract_structure(pdf_path)
         try:
             count = render.pdf_page_count(pdf_path)
         except Exception as exc:  # noqa: BLE001 - no debe tumbar la ingesta
@@ -652,6 +653,7 @@ def _extract_pdf_source(
     capitulos: list[dict],
     storage: Storage,
     first_page: int = 1,
+    structures: dict | None = None,
 ) -> dict:
     """Extrae páginas de uno o más PDF (texto, bloques, imagen y procedencia).
 
@@ -659,6 +661,7 @@ def _extract_pdf_source(
     OpenDataLoader conserva ayudas visuales y cajas aproximadas de respaldo.
     Sin texto nativo se usan los bloques o pdf-inspector, con motor real.
     `first_page` numera las imágenes/recortes guardados (cola: una página por vez).
+    `structures` (ruta -> salida de opendataloader) evita relanzar la JVM.
     """
     native_by_path = {}
     for pdf_path in pdf_paths:
@@ -668,7 +671,7 @@ def _extract_pdf_source(
             logger.warning("Extracción nativa no disponible para %s: %s", pdf_path.name, exc)
             native_by_path[pdf_path] = []
     image_urls, bloques_por_pagina, image_sizes, figuras_por_pagina = _pdf_verification(
-        pdf_paths, libro_id, storage, native_by_path, first_page
+        pdf_paths, libro_id, storage, native_by_path, first_page, structures
     )
 
     pages: list[dict] = []

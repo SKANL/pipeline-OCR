@@ -75,8 +75,8 @@ def test_delete_during_active_job_leaves_nothing_behind(queue, s3, monkeypatch) 
     job_id = _txt_job(s3, "Uno.\fDos.".encode(), libro_id="libro-borrado")
     real = jobs._extract_page
 
-    def extract_then_delete(kind, path, local, numero, libro_id, storage):
-        result = real(kind, path, local, numero, libro_id, storage)
+    def extract_then_delete(kind, path, local, numero, libro_id, storage, **kwargs):
+        result = real(kind, path, local, numero, libro_id, storage, **kwargs)
         if numero == 1:  # the editor deletes the book while page 1 is in flight
             assert client.delete(f"/api/v1/books/{libro_id}").status_code == 204
             s3.put(f"{libro_id}/paginas/1.png", b"png", "image/png")  # media written after the delete

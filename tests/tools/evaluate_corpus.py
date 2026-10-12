@@ -167,10 +167,10 @@ def run_item(item: dict, modo: str, storage) -> dict:
     ODL.update(llamadas=0, segundos=0.0)
     start = time.perf_counter()
     try:
-        results = []
+        results, odl_cache = [], {}
         for numero, local in enumerate(locals_, 1):
             CURRENT.update(slug=item["slug"], path=item["path"], key=f"{item['slug']}-p{local + 1}")
-            results.append(jobs._extract_page(kind, item["path"], local, numero, libro_id, storage))
+            results.append(jobs._extract_page(kind, item["path"], local, numero, libro_id, storage, odl_cache=odl_cache))
     finally:
         pdf_classify.is_text_based = _real_is_text
     seconds = time.perf_counter() - start

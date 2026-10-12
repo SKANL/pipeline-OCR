@@ -35,7 +35,7 @@ from bson.errors import InvalidId
 from pymongo import ReturnDocument
 
 from app.db import books_collection, job_pages_collection, jobs_collection
-from app.services import ingest, pdf_classify, render
+from app.services import ingest, pdf_classify, render, structure
 from app.services import storage as storage_service
 from app.services.extract import FUENTE_PDF_ESCANEADO, FUENTE_TEXTO
 from app.services.ocr import OcrNotConfiguredError
@@ -203,8 +203,24 @@ def _page_count(kind: str, path: Path) -> int:
     return 1
 
 
-def _extract_page(kind: str, path: Path, local: int, numero: int, libro_id: str, storage) -> dict:
-    """Extract page `local` of `path` as book page `numero` via the shared builders."""
+def _structure(path: Path, cache: dict) -> dict:
+    """opendataloader output for a whole original PDF, computed once (one JVM).
+
+    ponytail: kept in memory for the job; a huge PDF's JSON is the ceiling
+    (batch by page ranges if that ever matters on 512 MB).
+    """
+    if path not in cache:
+        cache[path] = structure.extract_structure(path)
+    return cache[path]
+
+
+def _extract_page(kind: str, path: Path, local: int, numero: int, libro_id: str, storage,
+                  odl_cache: dict | None = None) -> dict:
+    """Extract page `local` of `path` as book page `numero` via the shared builders.
+
+    With `odl_cache`, opendataloader runs once per original PDF and each page
+    reuses its slice; without it, the one-page PDF is analysed on its own.
+    """
     if kind == "txt":
         texto = path.read_text(encoding="utf-8").split("\f")[local]
         return {"pages": [{"texto": texto, "motor": FUENTE_TEXTO}], "fuente": FUENTE_TEXTO,
@@ -227,7 +243,11 @@ def _extract_page(kind: str, path: Path, local: int, numero: int, libro_id: str,
             src.close()
         text_based = pdf_classify.is_text_based(pdf_classify.classify_pdf_file(one))
         ingest._require_ocr_if_needed(needs_ocr=not text_based)
-        return ingest._extract_pdf_source([one], libro_id, [], storage, first_page=numero)
+        structures = None
+        if odl_cache is not None:
+            arch = _structure(path, odl_cache)
+            structures = {one: {key: {1: arch[key].get(local + 1, [])} for key in ("bloques", "figuras")}}
+        return ingest._extract_pdf_source([one], libro_id, [], storage, first_page=numero, structures=structures)
 
 
 def process(job: dict) -> int:
@@ -256,12 +276,13 @@ def process(job: dict) -> int:
     done = {c["numero"] for c in checkpoints.find({"trabajo_id": job["_id"]}, {"numero": 1})}
     heartbeat(job, paginas_hechas=len(done), paginas_total=total)
     numero = 0
+    odl_cache: dict = {}
     for path, count in zip(paths, counts):
         for local in range(count):
             numero += 1
             if numero in done:
                 continue
-            result = _extract_page(kind, path, local, numero, job["libro_id"], storage)
+            result = _extract_page(kind, path, local, numero, job["libro_id"], storage, odl_cache=odl_cache)
             pagina = result["pages"][0]
             pagina["numero"] = numero
             # Still ours (not deleted/stolen) before writing the checkpoint.
