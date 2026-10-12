@@ -32,8 +32,9 @@ class TokenBucket:
         now = time.monotonic() if now is None else now
         rate = capacity / period
         with self._lock:
-            if len(self._state) > _MAX_KEYS:
-                self._state.clear()
+            if key not in self._state and len(self._state) >= _MAX_KEYS:
+                # ponytail: O(n) eviction of the stalest key, only when the map is full.
+                del self._state[min(self._state, key=lambda k: self._state[k][1])]
             tokens, last = self._state.get(key, (float(capacity), now))
             tokens = min(capacity, tokens + (now - last) * rate)
             if tokens >= 1:
@@ -63,7 +64,8 @@ def client_key(request: Request) -> str:
     if email:
         return f"user:{email}"
     if get_settings().trust_proxy_headers:
-        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        # The trusted proxy appends the real peer last; earlier entries are client-supplied.
+        forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
         if forwarded:
             return f"ip:{forwarded}"
     return f"ip:{request.client.host if request.client else 'desconocido'}"

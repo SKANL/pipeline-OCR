@@ -56,9 +56,12 @@ def test_forwarded_for_only_trusted_when_enabled(env) -> None:
     assert [r.status_code for r in spoof] == [422, 429]  # header ignored: same client
 
     env(RATE_LIMIT_WRITE_PER_MIN="1", TRUST_PROXY_HEADERS="true")
-    proxied = [client.post("/api/v1/uploads", json={"archivos": []}, headers={"X-Forwarded-For": f"9.9.9.{i}, 10.0.0.1"})
+    # The proxy appends the real peer on the right; the left-most entries are client-controlled.
+    rotated = [client.post("/api/v1/uploads", json={"archivos": []}, headers={"X-Forwarded-For": f"9.9.9.{i}, 10.0.0.1"})
                for i in range(2)]
-    assert [r.status_code for r in proxied] == [422, 422]
+    assert [r.status_code for r in rotated] == [422, 429]
+    other = client.post("/api/v1/uploads", json={"archivos": []}, headers={"X-Forwarded-For": "9.9.9.0, 10.0.0.2"})
+    assert other.status_code == 422
 
 
 def test_ingest_disabled_without_allowed_roots(env) -> None:
