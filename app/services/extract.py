@@ -2,8 +2,8 @@
 
 Decide la ruta según la clasificación de `pdf-inspector`:
 - PDF con capa de texto -> extracción local (sin OCR), procedencia `pdf_digital`.
-- PDF escaneado/imagen -> OCR con Mistral, procedencia `pdf_escaneado`.
-- Conjunto de imágenes -> OCR con Mistral, procedencia `imagenes`.
+- PDF escaneado/imagen -> OCR (proveedor activo), procedencia `pdf_escaneado`.
+- Conjunto de imágenes -> OCR (proveedor activo), procedencia `imagenes`.
 
 Cada página conserva su procedencia real: motor que la produjo y, cuando
 aplica, la confianza de OCR (nula cuando el texto se extrajo localmente).
@@ -38,6 +38,7 @@ class PageExtraction:
     ocr_confianza: float | None = None
     motor: str | None = None
     imagen_url: str | None = None
+    bloques: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -115,6 +116,7 @@ def extract_from_pdf(path: str | Path) -> ExtractionResult:
             texto=page.texto,
             ocr_confianza=page.confianza,
             motor=page.motor,
+            bloques=page.bloques,
         )
         for index, page in enumerate(result.paginas, start=1)
     ]
@@ -141,6 +143,7 @@ def extract_from_images(paths) -> ExtractionResult:
             texto=page.texto,
             ocr_confianza=page.confianza,
             motor=page.motor,
+            bloques=page.bloques,
         )
         for index, page in enumerate(result.paginas, start=1)
     ]

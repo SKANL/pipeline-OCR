@@ -60,7 +60,9 @@ Por ejemplo, `multiplicative` puede aparecer como `multi-plicative` y
 Estos números y la similitud de secuencia por página **no prueban retención
 semántica completa**. Se mantiene el orden nativo de PDFium, sin reordenación
 heurística; no se certifica el orden lógico perfecto de columnas, tablas,
-fórmulas o etiquetas de figuras. No se deshacen guiones automáticamente.
+fórmulas o etiquetas de figuras. Desde P2 (`services/cleanup.py`) el libro armado
+quita cabeceras/pies repetidos y guiones de fin de línea borrando caracteres y
+remapeando `posiciones`/`lectura`; ver `docs/EVALUACION_PIPELINE.md`.
 
 ## API instalada y decisión técnica
 

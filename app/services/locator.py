@@ -7,6 +7,7 @@ import unicodedata
 from pathlib import Path
 
 from app.services.structure import normalize_bbox, _valid_bbox
+from app.services.text import QUOTES
 
 MAX_MATCHES = 100
 MAX_RECTS = 64
@@ -19,7 +20,7 @@ def folded_with_offsets(text: str) -> tuple[str, list[tuple[int, int]]]:
     chars: list[str] = []
     offsets: list[tuple[int, int]] = []
     for index, char in enumerate(text):
-        value = "".join(c for c in unicodedata.normalize("NFKD", char).lower() if not unicodedata.combining(c))
+        value = "".join(c for c in unicodedata.normalize("NFKD", char.translate(QUOTES)).lower() if not unicodedata.combining(c))
         if not value and offsets:
             start, _ = offsets[-1]
             offsets[-1] = (start, index + 1)

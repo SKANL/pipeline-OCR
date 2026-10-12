@@ -24,10 +24,34 @@ class Settings(BaseSettings):
     mongodb_db: str = "biblioteca"
     mistral_api_key: str = ""
     mistral_ocr_model: str = "mistral-ocr-latest"
+    ocr_provider: str = "tesseract"  # tesseract | mistral | glm (registry in services/ocr.py)
+    ocr_langs: str = "spa+lat"  # Tesseract languages
+    ocr_dpi: int = 300  # PDF page render resolution sent to image-only OCR providers
+    glm_api_key: str = ""
+    glm_ocr_model: str = "glm-ocr"
+    glm_api_base_url: str = "https://api.z.ai/api/paas/v4"
+    opendataloader_enabled: bool = True  # Java layout helper; false => PDFium only (Render free)
     media_root: str = "./_media"
-    max_upload_bytes: int = 104_857_600  # 100 MiB por petición
+    # Almacenamiento S3-compatible (R2 / SeaweedFS); vacío => backend local MEDIA_ROOT
+    s3_endpoint_url: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_bucket: str = ""
+    s3_public_base_url: str = ""  # vacío => URLs GET firmadas
+    s3_region: str = "auto"
+    max_upload_bytes: int = 104_857_600  # 100 MiB por petición / subida
+    max_file_bytes: int = 52_428_800  # 50 MiB por archivo (subidas firmadas)
+    worker_enabled: bool = True  # worker de la cola en el mismo proceso
+    text_cleanup: bool = True  # quitar cabeceras/pies repetidos y guiones de fin de línea al armar el libro
+    scan_preprocess: bool = True  # imágenes: EXIF, grises, contraste, enderezado y recorte antes del OCR
     page_image_dpi: int = 150  # resolución del render PDF -> PNG
     api_key: str = ""  # si está vacía, los endpoints de escritura no exigen auth (dev)
+    auth_secret: str = ""  # HS256 secret shared with the PWA (bearer tokens); empty => no bearer auth
+    admin_emails: str = ""  # bootstrap admins, comma separated (no DB row needed)
+    trust_proxy_headers: bool = False  # trust X-Forwarded-For for rate limiting (true on Render)
+    rate_limit_search_per_min: int = 120  # per client
+    rate_limit_write_per_min: int = 20  # per client (uploads, edits, ingest)
+    ingest_allowed_roots: str = ""  # absolute dirs for POST /ingest, comma separated; empty => disabled
     cors_origins: str = "http://localhost:3000,http://localhost:3010"  # orígenes permitidos, separados por coma
 
 

@@ -5,11 +5,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse, RedirectResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.config import get_settings
-from app.db import books_collection, pages_collection
+from app.db import books_collection, job_pages_collection, jobs_collection, pages_collection
 from app.models import (
     BookListResponse,
     FacetValue,
@@ -18,8 +22,12 @@ from app.models import (
     PageResponse,
     PageSummary,
 )
-from app.services.storage import get_storage
-from app.services.text import make_diacritic_insensitive_pattern
+from app.ratelimit import limit_write
+from app.security import require_editor
+from app.services import ocr
+from app.services import storage as storage_service
+from app.services.storage import LocalStorage, get_storage, media_url
+from app.services.text import fold_text, make_diacritic_insensitive_pattern
 from app.services.locator import locate_matches
 
 router = APIRouter(tags=["books"])
@@ -113,7 +121,8 @@ def list_pages(
     }
     cursor = pages.find(filtro, projection).sort("numero", 1).skip(offset).limit(limit)
     return PageListResponse(
-        total=total, resultados=[PageSummary(**doc) for doc in cursor]
+        total=total,
+        resultados=[PageSummary(**{**doc, "imagen_url": media_url(doc.get("imagen_url"))}) for doc in cursor],
     )
 
 
@@ -150,11 +159,11 @@ def get_page(libro_id: str, numero: int, q: str | None = Query(None, max_length=
         texto=doc.get("texto", ""),
         conteo_palabras=doc.get("conteo_palabras", 0),
         conteo_caracteres=doc.get("conteo_caracteres", 0),
-        imagen_url=doc.get("imagen_url"),
+        imagen_url=media_url(doc.get("imagen_url")),
         imagen_ancho=doc.get("imagen_ancho"),
         imagen_alto=doc.get("imagen_alto"),
         bloques=doc.get("bloques") or [],
-        figuras=doc.get("figuras") or [],
+        figuras=[{**f, "imagen_url": media_url(f.get("imagen_url"))} for f in doc.get("figuras") or []],
         lectura=doc.get("lectura") or [],
         ref_anterior=ref_anterior,
         ref_siguiente=ref_siguiente,
@@ -166,7 +175,7 @@ def get_page(libro_id: str, numero: int, q: str | None = Query(None, max_length=
 
 
 @router.get("/pages/{libro_id}/pagina/{numero}/imagen")
-def get_page_image(libro_id: str, numero: int) -> FileResponse:
+def get_page_image(libro_id: str, numero: int) -> Response:
     """Devuelve la imagen (PNG) de la página o 404 si no existe."""
     if not _SAFE_LIBRO_ID.match(libro_id):
         raise HTTPException(status_code=400, detail=f"libro_id inválido: {libro_id}")
@@ -180,6 +189,9 @@ def get_page_image(libro_id: str, numero: int) -> FileResponse:
         raise HTTPException(status_code=404, detail=f"Imagen no encontrada: {ref}")
 
     relative = imagen_url.removeprefix("/media/").lstrip("/")
+    storage = get_storage()
+    if not isinstance(storage, LocalStorage):
+        return RedirectResponse(storage.url(relative))
 
     # Defensa en profundidad: resolver contra MEDIA_ROOT y exigir contención.
     root = Path(get_settings().media_root).resolve()
@@ -188,7 +200,7 @@ def get_page_image(libro_id: str, numero: int) -> FileResponse:
         raise HTTPException(status_code=404, detail=f"Imagen no encontrada: {ref}")
 
     try:
-        path = get_storage().path(relative)
+        path = storage.path(relative)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=f"Imagen no encontrada: {ref}") from exc
 
@@ -196,3 +208,107 @@ def get_page_image(libro_id: str, numero: int) -> FileResponse:
         raise HTTPException(status_code=404, detail=f"Imagen no encontrada en disco: {relative}")
 
     return FileResponse(path, media_type="image/png", filename=f"{numero}.png")
+
+
+# --------------------------------------------------------------------------
+# Editor management (PATCH / DELETE / reprocesar)
+# --------------------------------------------------------------------------
+class LibroPatch(BaseModel):
+    """Editable `metadatos` fields; unknown fields are rejected.
+
+    Every field is optional (PATCH). `titulo`, `idioma` and `temas` may be
+    omitted but not set to null; `update_book` enforces that with a 422.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    titulo: Optional[str] = Field(None, min_length=1, max_length=500)
+    subtitulo: Optional[str] = Field(None, max_length=500)
+    autor: Optional[str] = Field(None, max_length=300)
+    autor_normalizado: Optional[str] = Field(None, max_length=300)
+    editorial: Optional[str] = Field(None, max_length=300)
+    anio_publicacion: Optional[int] = Field(None, ge=0, le=3000)
+    idioma: Optional[str] = Field(None, min_length=2, max_length=10)
+    genero: Optional[str] = Field(None, max_length=100)
+    tradicion: Optional[str] = Field(None, max_length=100)
+    isbn: Optional[str] = Field(None, max_length=20)
+    temas: Optional[list[str]] = Field(None, max_length=50)
+    descripcion: Optional[str] = Field(None, max_length=5000)
+
+
+# Fields denormalized onto every `pages` row (see `ingest.build_page_projection`).
+_PAGE_FIELDS = ("titulo", "autor", "genero", "autor_normalizado")
+_ACTIVE = ("esperando_subida", "pendiente", "procesando")
+
+
+def _safe_id(libro_id: str) -> str:
+    if not _SAFE_LIBRO_ID.match(libro_id):
+        raise HTTPException(status_code=400, detail=f"libro_id inválido: {libro_id}")
+    return libro_id
+
+
+@router.patch("/books/{libro_id}", dependencies=[Depends(limit_write), Depends(require_editor)])
+def update_book(libro_id: str, payload: LibroPatch) -> dict:
+    """Edit metadata; `titulo`/`idioma`/`temas` cannot be null."""
+    changes = payload.model_dump(exclude_unset=True)
+    for required in ("titulo", "idioma", "temas"):
+        if required in changes and changes[required] is None:
+            raise HTTPException(status_code=422, detail=f"{required} no puede ser null.")
+    if not books_collection().find_one({"libro_id": libro_id}, {"_id": 1}):
+        raise HTTPException(status_code=404, detail=f"Libro no encontrado: {libro_id}")
+    if changes:
+        books_collection().update_one({"libro_id": libro_id}, {"$set": {
+            **{f"metadatos.{k}": v for k, v in changes.items()}, "actualizado_en": datetime.now(timezone.utc)}})
+        page_changes = {k: v for k, v in changes.items() if k in _PAGE_FIELDS}
+        if "titulo" in page_changes:
+            page_changes["titulo_busqueda"] = fold_text(page_changes["titulo"])
+        if page_changes:
+            pages_collection().update_many({"libro_id": libro_id}, {"$set": page_changes})
+    return get_book(libro_id)
+
+
+@router.delete("/books/{libro_id}", status_code=204, dependencies=[Depends(limit_write), Depends(require_editor)])
+def delete_book(libro_id: str) -> Response:
+    """Delete the book, its pages, its jobs + checkpoints and its media prefix. Idempotent."""
+    _safe_id(libro_id)
+    job_ids = [j["_id"] for j in jobs_collection().find({"libro_id": libro_id}, {"_id": 1})]
+    job_pages_collection().delete_many({"trabajo_id": {"$in": job_ids}})
+    jobs_collection().delete_many({"_id": {"$in": job_ids}})
+    pages_collection().delete_many({"libro_id": libro_id})
+    books_collection().delete_one({"libro_id": libro_id})
+    storage_service.get_storage().delete_prefix(f"{libro_id}/")
+    return Response(status_code=204)
+
+
+class ReprocesarRequest(BaseModel):
+    ocr_proveedor: str | None = None  # None => OCR_PROVIDER
+
+    @field_validator("ocr_proveedor")
+    @classmethod
+    def _known_provider(cls, value: str | None) -> str | None:
+        return ocr.validate_provider(value)
+
+
+@router.post("/books/{libro_id}/reprocesar", status_code=202, dependencies=[Depends(limit_write), Depends(require_editor)])
+def reprocess_book(libro_id: str, payload: ReprocesarRequest | None = None) -> dict:
+    """Requeue the book's ingest job from its stored originals, keeping edited metadata."""
+    book = books_collection().find_one({"libro_id": libro_id}, {"metadatos": 1})
+    if not book:
+        raise HTTPException(status_code=404, detail=f"Libro no encontrado: {libro_id}")
+    job = jobs_collection().find_one({"libro_id": libro_id}, sort=[("creado_en", -1)])
+    if job is None:
+        # ponytail: books ingested before the job queue have no job; re-upload them instead.
+        raise HTTPException(status_code=409, detail="El libro no tiene originales en la cola; vuelve a subirlo.")
+    now = datetime.now(timezone.utc)
+    result = jobs_collection().update_one(
+        {"_id": job["_id"], "estado": {"$nin": list(_ACTIVE)}},
+        {"$set": {"estado": "pendiente", "intentos": 0, "error": None, "worker_id": None,
+                  "bloqueado_hasta": None, "disponible_desde": now, "actualizado_en": now,
+                  "metadatos": book.get("metadatos") or {},
+                  "ocr_proveedor": payload.ocr_proveedor if payload else None,
+                  "progreso": {"paginas_hechas": 0, "paginas_total": None}}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Ya hay un procesamiento activo para este libro.")
+    job_pages_collection().delete_many({"trabajo_id": job["_id"]})
+    return {"trabajo_id": str(job["_id"]), "estado": "pendiente"}

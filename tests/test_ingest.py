@@ -72,3 +72,26 @@ def test_parse_uses_explicit_libro_id(tmp_path: Path) -> None:
     libro = parse_book_directory(book_dir)
     assert libro["libro_id"] == "id-fijo"
     assert libro["conteo_paginas"] == 0
+
+
+def test_persist_prunes_media_not_referenced_by_the_new_book(monkeypatch, tmp_path) -> None:
+    from unittest.mock import MagicMock
+
+    from app.services import ingest
+    from app.services.storage import LocalStorage
+
+    monkeypatch.setattr(ingest, "books_collection", MagicMock())
+    monkeypatch.setattr(ingest, "pages_collection", MagicMock())
+    storage = LocalStorage(tmp_path)
+    for key in ("b/manual.pdf", "b/viejo.pdf", "b/paginas/1.png", "b/paginas/2.png",
+                "b/figuras/1-0.png", "b/figuras/1-1.png", "b-2/paginas/1.png"):
+        storage.put(key, b"x", "image/png")
+    libro = {
+        "libro_id": "b", "origen": ["manual.pdf"], "metadatos": {},
+        "paginas": [{"ref": "b/pagina/1", "numero": 1, "texto": "",
+                     "imagen_url": "b/paginas/1.png",
+                     "figuras": [{"imagen_url": "b/figuras/1-0.png"}, {"imagen_url": None}]}],
+    }
+    ingest._persist(libro, storage)
+    left = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file())
+    assert left == ["b-2/paginas/1.png", "b/figuras/1-0.png", "b/manual.pdf", "b/paginas/1.png"]

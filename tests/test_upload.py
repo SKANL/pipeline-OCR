@@ -77,13 +77,13 @@ def test_upload_text_pdf_indexes_and_searches() -> None:
     assert all(p["motor"] == "pypdfium2" for p in pages)
     assert all(p["posiciones"] for p in pages)
     assert all(p["imagen_url"] for p in pages)
-    assert all(p["imagen_url"] == f"/media/subida-digital/paginas/{p['numero']}.png" for p in pages)
+    assert all(p["imagen_url"] == f"subida-digital/paginas/{p['numero']}.png" for p in pages)  # keys
 
     search = client.get("/api/v1/search", params={"q": "gracia"}).json()
     assert search["total"] >= 1
     hits = [h for h in search["resultados"] if h["libro_id"] == "subida-digital"]
     assert hits
-    assert all(h["imagen_url"] for h in hits)
+    assert all(h["imagen_url"].startswith("/media/subida-digital/") for h in hits)
     if any(p.get("bloques") for p in pages):
         assert any(h["bbox"] for h in hits)
 
@@ -117,3 +117,26 @@ def test_upload_rejects_unsupported_files() -> None:
         files=[("files", ("nota.txt", b"hola", "text/plain"))],
     )
     assert response.status_code == 400
+
+
+def test_page_image_redirects_to_bucket_url_with_s3(monkeypatch) -> None:
+    import boto3
+    from moto import mock_aws
+
+    from app.db import pages_collection
+    from app.services.storage import S3Storage
+
+    with mock_aws():
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="biblioteca")
+        storage = S3Storage(endpoint_url=None, access_key_id="x", secret_access_key="x",
+                            bucket="biblioteca", region="us-east-1")
+        monkeypatch.setattr("app.routers.books.get_storage", lambda: storage)
+        pages_collection().update_one(
+            {"ref": "s3-redir/pagina/1"},
+            {"$set": {"libro_id": "s3-redir", "numero": 1, "imagen_url": "s3-redir/paginas/1.png"}},
+            upsert=True,
+        )
+        response = TestClient(app).get("/api/v1/pages/s3-redir/pagina/1/imagen", follow_redirects=False)
+    assert response.status_code == 307
+    assert "s3-redir/paginas/1.png" in response.headers["location"]
+    assert "X-Amz-Signature" in response.headers["location"]

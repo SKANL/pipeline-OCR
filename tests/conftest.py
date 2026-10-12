@@ -17,6 +17,16 @@ os.environ.setdefault(
     "MEDIA_ROOT", str(Path(tempfile.gettempdir()) / "pipeline_ocr_test_media")
 )
 
+# Tests use the local backend unless a test builds its own S3Storage.
+os.environ["S3_ENDPOINT_URL"] = ""
+# Generous limits so the suite is not throttled; tests/test_limits.py lowers them.
+os.environ.setdefault("RATE_LIMIT_SEARCH_PER_MIN", "100000")
+os.environ.setdefault("RATE_LIMIT_WRITE_PER_MIN", "100000")
+# Tests drive the job queue explicitly (`jobs.run_once`); no background worker.
+os.environ["WORKER_ENABLED"] = "false"
+# Tests pin the layout helper on; the PDFium-only path is tested by explicit overrides.
+os.environ["OPENDATALOADER_ENABLED"] = "true"
+
 import pytest  # noqa: E402
 from pymongo import MongoClient  # noqa: E402
 

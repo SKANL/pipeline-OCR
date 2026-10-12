@@ -58,7 +58,7 @@ class Capitulo(BaseModel):
 class Bloque(BaseModel):
     """Bloque de texto con su ubicación en la página (capa de verificación)."""
 
-    bbox: list[float]
+    bbox: Optional[list[float]] = None  # PDF points; None for OCR blocks (image-only geometry)
     texto: str
     bbox_norm: Optional[list[float]] = None
     tipo: str = "paragraph"

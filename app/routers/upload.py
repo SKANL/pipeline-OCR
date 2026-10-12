@@ -11,18 +11,21 @@ import json
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.config import get_settings
-from app.security import require_api_key
+from app.db import books_collection
+from app.ratelimit import limit_write
+from app.security import require_editor
 from app.services.ingest import UploadedFileData, ingest_uploaded_files
 from app.services.ocr import OcrNotConfiguredError
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
-@router.post("/upload", dependencies=[Depends(require_api_key)])
+@router.post("/upload", dependencies=[Depends(limit_write)])
 def ingest_upload(
     files: list[UploadFile] = File(..., description="Uno o más PDF, o solo imágenes."),
     libro_id: str | None = Form(None),
     metadatos: str | None = Form(None, description="JSON con metadatos del libro."),
+    editor: dict = Depends(require_editor),
 ) -> dict:
     """Ingesta archivos subidos y devuelve el resumen (igual que `/ingest`).
 
@@ -55,10 +58,13 @@ def ingest_upload(
         override = parsed
 
     try:
-        return ingest_uploaded_files(
+        summary = ingest_uploaded_files(
             uploads, libro_id=libro_id, metadatos_override=override
         )
     except OcrNotConfiguredError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if editor["email"]:
+        books_collection().update_one({"libro_id": summary["libro_id"]}, {"$set": {"creado_por": editor["email"]}})
+    return summary

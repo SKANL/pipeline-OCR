@@ -39,25 +39,42 @@ def pages_collection() -> Collection:
     return get_db()["pages"]
 
 
+def jobs_collection() -> Collection:
+    """Colección `trabajos`: cola de ingesta (ver `services/jobs.py`)."""
+    return get_db()["trabajos"]
+
+
+def job_pages_collection() -> Collection:
+    """Colección `trabajo_paginas`: checkpoints por página de un trabajo."""
+    return get_db()["trabajo_paginas"]
+
+
+def editors_collection() -> Collection:
+    """Colección `editores`: `{email, rol: editor|admin, creado}`."""
+    return get_db()["editores"]
+
+
 def ensure_indexes() -> list[str]:
     """Crea los índices requeridos y devuelve sus nombres.
 
-    - `$text` sobre `pages.texto_busqueda` (texto plegado: sin acentos)
+    - `$text` sobre `pages.texto_busqueda` + `titulo_busqueda` (plegados; título pesa 5)
     - índice simple sobre `pages.libro_id`
     - único sobre `pages.ref`
     - único sobre `books.libro_id`
 
-    Migra limpiamente: elimina el índice legado `tx_pages_texto` si existe.
+    Migra limpiamente: elimina los índices de texto legados si existen.
     """
     books = books_collection()
     pages = pages_collection()
 
-    # Migración: el índice de texto apuntaba a `texto` (sensible a acentos).
-    try:
-        if "tx_pages_texto" in pages.index_information():
-            pages.drop_index("tx_pages_texto")
-    except Exception:  # noqa: BLE001 - si ya no existe, no hay nada que hacer
-        pass
+    # Migración: índices de texto anteriores (`texto` con acentos; luego solo
+    # `texto_busqueda`). Una colección admite un único índice `$text`.
+    for legacy in ("tx_pages_texto", "tx_pages_texto_busqueda"):
+        try:
+            if legacy in pages.index_information():
+                pages.drop_index(legacy)
+        except Exception:  # noqa: BLE001 - si ya no existe, no hay nada que hacer
+            pass
 
     names: list[str] = []
     names.append(books.create_index("libro_id", unique=True, name="uq_books_libro_id"))
@@ -65,9 +82,22 @@ def ensure_indexes() -> list[str]:
     names.append(pages.create_index("ref", unique=True, name="uq_pages_ref"))
     names.append(
         pages.create_index(
-            [("texto_busqueda", TEXT)],
-            name="tx_pages_texto_busqueda",
+            [("titulo_busqueda", TEXT), ("texto_busqueda", TEXT)],
+            name="tx_pages_busqueda",
             default_language="spanish",
+            weights={"titulo_busqueda": 5, "texto_busqueda": 1},
         )
     )
+    jobs = jobs_collection()
+    names.append(jobs.create_index([("estado", ASCENDING), ("disponible_desde", ASCENDING)], name="ix_trabajos_pendientes"))
+    names.append(jobs.create_index([("estado", ASCENDING), ("bloqueado_hasta", ASCENDING)], name="ix_trabajos_lease"))
+    # Idempotencia: un trabajo por contenido (sha256 de los bytes, en orden).
+    names.append(jobs.create_index("sha256", unique=True, name="uq_trabajos_sha256",
+                                   partialFilterExpression={"sha256": {"$type": "string"}}))
+    # Subidas abandonadas (nunca completadas) caducan a las 24 h.
+    names.append(jobs.create_index("creado_en", name="ttl_trabajos_esperando_subida", expireAfterSeconds=86400,
+                                   partialFilterExpression={"estado": "esperando_subida"}))
+    names.append(job_pages_collection().create_index(
+        [("trabajo_id", ASCENDING), ("numero", ASCENDING)], unique=True, name="uq_trabajo_paginas"))
+    names.append(editors_collection().create_index("email", unique=True, name="uq_editores_email"))
     return names

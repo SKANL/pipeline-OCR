@@ -2,20 +2,59 @@
 
 Documento técnico del backend/API y su relación con la PWA. Para el encuadre de
 producto ver `PRODUCT_BRIEF.md`; para endpoints, `API.md`; para ejecutar,
-`RUNNING.md`.
+`RUNNING.md`; para llevarlo a producción, `DESPLIEGUE.md`.
 
 ## Vista general
 
 ```
-PWA (Next.js)  ──HTTP/JSON──►  API FastAPI  ──►  MongoDB (books / pages)
-   repo hermano                 pipeline              + archivos en MEDIA_ROOT
-   biblioteca-eclesiastica-web  de ingesta/OCR
+ NAVEGADOR                         VERCEL (Next.js, PWA)                    RENDER free (Docker)
+ +-----------+   lectura SSR      +-------------------------+  HTTP/JSON  +---------------------------+
+ | lector /  |<------------------>| Server Components       |------------>| FastAPI  /api/v1          |
+ | editor    |                    | Server Actions          |  Bearer JWT | - lectura publica         |
+ | (SW cache)|   login Google     | Auth.js v5 (sesion JWT) |  HS256 5min | - escrituras: editor/admin|
+ +-----+-----+<------------------>| firma token por llamada |             | - rate limit en memoria   |
+       |                          +-------------------------+             |                           |
+       |                                                                  |  hilo WORKER (lifespan)   |
+       | (3) PUT directo, URL firmada 15 min (CORS del bucket)            |  drena la cola `trabajos` |
+       |                                                                  |  pipeline: clasificar ->  |
+       |    +---------------------------------------------+               |  extraer/OCR -> normalizar|
+       +--->| Cloudflare R2 (SeaweedFS en local), S3 API  |<--------------|  -> persistir             |
+            | originales, paginas/{n}.png, figuras/       |  boto3 HEAD/  +-----+---------------+-----+
+            +---------------------------------------------+  GET/PUT/DEL        |               |
+                  ^  imagenes: URL publica o GET firmado 1 h                    |               | OCR (solo
+                  |  (en la respuesta de /ref y /search)                        v               | escaneados)
+                  |                                           +-------------------------+       v
+                  +-------------------------------------------| MongoDB Atlas (local:   |  +-------------+
+                                                              | docker mongo:8)         |  | Mistral OCR |
+                                                              | books, pages, trabajos, |  +-------------+
+                                                              | trabajo_paginas,editores|
+                                                              +-------------------------+
 ```
 
-- **API** (`app/`): expone `/api/v1`, corre el pipeline de ingesta y la búsqueda.
-- **MongoDB**: store. `books` (documento de archivo del libro) y `pages`
-  (proyección indexable, unidad de retrieval).
-- **PWA** (repo hermano): consume la API. No comparte código con el backend.
+Subida firmada (editor), numeración = pasos de la figura:
+
+```
+ (1) PWA calcula sha256 -> Server Action -> POST /uploads  --> API crea `trabajos` (esperando_subida)
+                                                              y devuelve URL PUT firmada por archivo
+ (2) idempotencia: mismo sha256 => 200 {existente:true}, sin URLs ni duplicados
+ (3) navegador --PUT--> R2 (reintentos con backoff; la API nunca retiene los bytes)
+ (4) Server Action -> POST /uploads/{id}/completar --> API HEAD de cada objeto (tamano) -> `pendiente`
+ (5) worker: claim atomico + lease 5 min -> por pagina: extraer/OCR -> checkpoint -> heartbeat
+     -> arma libro -> persiste books/pages + media -> `completado` (o reintento con backoff / `fallido`)
+ (6) PWA consulta GET /trabajos/{id} con backoff (1 s -> 10 s) hasta `completado`
+```
+
+- **API** (`app/`): expone `/api/v1`, corre la cola/worker, el pipeline de ingesta
+  y la búsqueda.
+- **MongoDB**: `books` (documento de archivo), `pages` (proyección indexable, unidad
+  de retrieval), `trabajos` (cola), `trabajo_paginas` (checkpoints) y `editores`.
+- **R2/S3**: originales y PNG de pagina/figuras; Mongo guarda **claves**; la URL se
+  arma al responder. Sin `S3_ENDPOINT_URL` + `S3_BUCKET` se usa `MEDIA_ROOT` local
+  (sin subidas firmadas: `/uploads` responde 501).
+- **PWA** (repo hermano `biblioteca-eclesiastica-web`): lee la API desde el
+  servidor (Server Components); solo "Copiar cita" llama a la API desde el
+  navegador. Service worker propio (`public/sw.js`) para el shell offline y páginas
+  leidas recientemente. No comparte código con el backend.
 
 ## Pipeline de ingesta (input → output)
 
@@ -24,7 +63,7 @@ ENTRADA: un PDF (nombre arbitrario) · un set de imágenes · paginas/*.txt
         │
    (1) CLASIFICAR (pdf-inspector)  → ¿tiene capa de texto?
          ├── digital ─► (2a) TEXTO + GLIFOS (pypdfium2); ayudas visuales (opendataloader)
-        └── escaneado ─► (2b) OCR (Mistral)
+        └── escaneado ─► (2b) OCR (proveedor: Tesseract | Mistral | GLM-OCR)
         │
    (3) NORMALIZAR  orden de páginas · procedencia real (motor, confianza, imagen_url)
                    · texto plegado `texto_busqueda` · conteos
@@ -88,7 +127,7 @@ Un documento por página: `libro_id`, `ref` (`{libro_id}/pagina/{n}`), `numero`,
 `texto_alternativo`, `estado`, `advertencia`, `orden_fuente`), y campos **desnormalizados** para
 filtrar/facetar: `genero`, `autor_normalizado`, `titulo`, `autor`.
 
-Índices (`ensure_indexes`): `$text` sobre `texto_busqueda` (spanish), único sobre
+Índices (`ensure_indexes`): `$text` sobre `titulo_busqueda` (peso 5) + `texto_busqueda` (peso 1) (spanish; páginas indexadas antes de P4 no tienen `titulo_busqueda` hasta reprocesarlas), único sobre
 `pages.ref` y `books.libro_id`, índice sobre `pages.libro_id`.
 
 ## Módulos
@@ -100,14 +139,91 @@ filtrar/facetar: `genero`, `autor_normalizado`, `titulo`, `autor`.
 | `services/pdf_classify.py` | Clasificación con pdf-inspector. |
 | `services/structure.py` | Bloques con bounding box (opendataloader) + `normalize_bbox`. |
 | `services/render.py` | Render de página a PNG y tamaño de página (pypdfium2). |
-| `services/ocr.py` | Cliente Mistral OCR (imagen / lista / PDF). |
-| `services/storage.py` | Almacenamiento de originales e imágenes de página (local, swappable). |
+| `services/ocr.py` | Contrato y registro de proveedores OCR; fachada imagen / lista / PDF. Proveedores en `ocr_tesseract.py`, `ocr_mistral.py`, `ocr_glm.py`. |
+| `services/storage.py` | Almacenamiento por clave (`{libro_id}/{original}`, `{libro_id}/paginas/{n}.png`, `{libro_id}/figuras/{p}-{i}.png`): local bajo `MEDIA_ROOT` o S3-compatible (R2 en prod, SeaweedFS local) si hay `S3_ENDPOINT_URL` + `S3_BUCKET`. Mongo guarda **claves** en `imagen_url`; la URL se arma al responder (`media_url`: `/media/...` local, `S3_PUBLIC_BASE_URL` + clave o GET firmado). Al re-ingestar se poda todo objeto bajo `{libro_id}/` que el libro nuevo no referencia (páginas, recortes, originales). |
 | `services/text.py` | `fold_text`, patrón diacrítico-insensible, limpieza de Markdown. |
 | `services/naming.py` | `slugify` y orden natural. |
 | `services/search.py` | `search_pages` (`$text`), snippet y bloque coincidente. |
 | `services/locator.py` | Texto/glifos nativos, Unicode con índices originales, coincidencias literales y precisión explícita. |
 | `services/pdf_layout.py` | Layout nativo de PDFium: orden de lectura y composición de ayudas visuales. |
 | `services/citation.py` | Citas APA / Chicago / MLA. |
+| `services/jobs.py` | Cola Mongo de trabajos de ingesta + worker en proceso. |
+| `routers/jobs.py` | Subidas con URL firmada (`/uploads`) y estado (`/trabajos`). |
+
+## Proveedores de OCR (`services/ocr.py`)
+
+El pipeline depende de un contrato mínimo; cada proveedor es un módulo con:
+
+- `NAME` — se guarda como `motor` de la página (el `modelo` va aparte);
+- `missing_config() -> str | None` — por qué no puede correr aquí (`None` = listo);
+- `ocr_image(data, mime) -> OcrPage` — `texto`, `confianza` (o `None`), `bloques` con
+  `bbox_norm = [nx, ny, nw, nh]` (origen arriba-izquierda, igual que los bloques de PDF);
+- opcional `ocr_pdf(path)` — ruta nativa de PDF (Mistral). Sin ella, la fachada rasteriza cada
+  página a `OCR_DPI` y llama `ocr_image`.
+
+| Proveedor | Dónde corre | Bloques | Confianza |
+|---|---|---|---|
+| `tesseract` (defecto) | binario local (`tesseract-ocr` + `spa`/`lat` en la imagen Docker) | por línea | media de palabras / 100 |
+| `mistral` | API Mistral Document AI | no | si la API la expone |
+| `glm` | API Z.ai `POST /layout_parsing` (`layout_details[].bbox_2d` normalizado) | por región | no |
+
+`OCR_PROVIDER` elige el proveedor global; `ocr_proveedor` en `POST /uploads` o
+`POST /books/{id}/reprocesar` lo cambia para ese trabajo (`jobs.process` corre dentro de
+`ocr.use_provider(...)`). El guard de ingesta (`require_configured`) falla antes de tocar la red.
+
+**Agregar un proveedor en 3 pasos**:
+
+1. Crear `app/services/ocr_<nombre>.py` con `NAME`, `missing_config()` y `ocr_image()`; para
+   errores HTTP usar `ocr.raise_for_http(...)` (permanente vs reintentable).
+2. Registrar una línea en `PROVIDERS` de `services/ocr.py`.
+3. Añadir sus ajustes en `app/config.py` (y `render.yaml`/README), más una prueba con transporte
+   simulado.
+
+## opendataloader opcional (`OPENDATALOADER_ENABLED`)
+
+`structure.extract_structure` es el único punto que lanza la JVM. Con `false` devuelve vacío:
+el texto y los glifos siguen saliendo de PDFium, la página se indexa y se localiza con precisión
+`exacta`; se pierden las cajas de opendataloader y los recortes de figuras que dependen de ellas
+(las ayudas visuales que PDFium detecta por sí solo se conservan). Defecto `true` en local (sin
+cambios de comportamiento) y `false` en Render free (`render.yaml`), donde Java pesa en 512 MB.
+
+## Cola de trabajos (`services/jobs.py`)
+
+Render free no tiene workers aparte y duerme tras 15 min sin HTTP entrante, así que la cola vive en
+Mongo (`trabajos`) y un **hilo worker por instancia** (arrancado en el `lifespan`, `WORKER_ENABLED`)
+la drena:
+
+- **Claim atómico** (`find_one_and_update`): un trabajo `pendiente` con `disponible_desde <= ahora`,
+  o uno `procesando` cuyo lease (`bloqueado_hasta`) venció porque la instancia durmió o cayó. Cada
+  claim suma un intento.
+- **Lease + heartbeat**: lease de 5 min, renovado tras cada página junto con `progreso`. Si otro
+  worker tomó el trabajo, el anterior se detiene (`LeaseLost`); el lease se verifica también justo
+  antes de persistir el libro y al marcarlo `completado`.
+- **Reintentos**: error transitorio → `pendiente` con backoff exponencial + jitter
+  (30 s · 2^(n-1) · [1, 2), tope 1 h). `PermanentJobError` (tipos mezclados, sha256 distinto, sin
+  páginas), OCR no configurado y `OcrPermanentError` (clave inválida, plan sin OCR: `429` con `x-ratelimit-limit-req-minute: 0`, `4xx`) son permanentes; `OcrRetryableError` (`429` normal, `5xx`, red) se reintenta; cualquier otro error se reintenta. Tras `max_intentos` (5) → `fallido`; también un trabajo que se cae
+  en bucle sin intentos restantes.
+- **Checkpoints por página** (`trabajo_paginas`): cada página terminada se guarda y un reintento
+  salta las ya hechas. Un PDF se corta en PDFs de una página y cada uno pasa por los mismos builders
+  (`_extract_pdf_source` / `_extract_image_source`, parámetro `first_page`): memoria acotada a una
+  página. Al final se arma el libro, se persiste (`_persist`) y se borran los checkpoints.
+- **Idempotencia**: índice único parcial sobre `trabajos.sha256`; las subidas nunca completadas
+  caducan a las 24 h (TTL parcial sobre `estado: esperando_subida`).
+
+**Techos**: un worker por instancia y un trabajo a la vez. Si Render duerme a mitad de un trabajo,
+este sigue cuando la instancia despierta (próxima petición HTTP) y el lease venció; cada reinicio
+consume un intento. Para que la cola avance sin tráfico, un ping externo a `/health` cada ~10 min
+(cron-job.org, GitHub Actions) mantiene la instancia despierta (las 750 h/mes gratis alcanzan para
+un servicio). Con opendataloader activo, cada página arranca la JVM: lento con 0.1 CPU.
+
+## Seguridad de escritura
+
+- `app/security.py`: `require_editor` acepta token Bearer HS256 de la PWA (Auth.js + Google; ver
+  `docs/API.md`) o `X-API-Key`; `require_admin` para `/editores` y `POST /ingest`. Roles desde
+  `ADMIN_EMAILS` o la colección `editores`. Los libros y trabajos guardan `creado_por` (email).
+- `app/ratelimit.py`: token bucket en memoria por cliente (búsqueda generosa, escrituras estrictas),
+  `429` + `Retry-After`. Techo: por instancia.
+- `POST /ingest` confinado a `INGEST_ALLOWED_ROOTS` (rutas reales); deshabilitado si no se configura.
 
 ## Límites conocidos / escalado
 

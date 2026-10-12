@@ -116,7 +116,7 @@ def test_pdf_verification_computes_bbox_norm(monkeypatch, tmp_path: Path) -> Non
         [pdf], "libro-x", storage
     )
 
-    assert image_urls == ["/media/libro-x/paginas/1.png"]
+    assert image_urls == ["libro-x/paginas/1.png"]
     assert len(image_sizes) == 1
     blocks = bloques_por_pagina[1]
     assert len(blocks) == 1
