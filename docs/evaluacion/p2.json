@@ -1,0 +1,151 @@
+{
+ "filas": [
+  {
+   "item": "astete-1787",
+   "modo": "ocr",
+   "error": "Error de OCR (PDF): API error occurred: Status 429. Body: {\"object\":\"error\",\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"param\":null,\"code\":\"1300\",\"ra"
+  },
+  {
+   "item": "astete-1787",
+   "modo": "capa",
+   "paginas": 20,
+   "segundos": 40.4,
+   "odl_llamadas": 20,
+   "odl_segundos": 35.8,
+   "guiones_residuales_1k": 0.61,
+   "cer": 0.1061,
+   "wer": 0.2563,
+   "fuga": 0,
+   "fuga_total": 4,
+   "_libro_id": "eval-astete-1787-capa",
+   "recall": 0.625,
+   "mrr": 0.625,
+   "consultas": 8
+  },
+  {
+   "item": "molinero-1695",
+   "modo": "ocr",
+   "error": "Error de OCR (PDF): API error occurred: Status 429. Body: {\"object\":\"error\",\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"param\":null,\"code\":\"1300\",\"ra"
+  },
+  {
+   "item": "molinero-1695",
+   "modo": "capa",
+   "paginas": 5,
+   "segundos": 37.6,
+   "odl_llamadas": 5,
+   "odl_segundos": 34.8,
+   "guiones_residuales_1k": 0.0,
+   "_libro_id": "eval-molinero-1695-capa"
+  },
+  {
+   "item": "ordo-1812",
+   "modo": "ocr",
+   "error": "Error de OCR (PDF): API error occurred: Status 429. Body: {\"object\":\"error\",\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"param\":null,\"code\":\"1300\",\"ra"
+  },
+  {
+   "item": "ordo-1812",
+   "modo": "capa",
+   "paginas": 5,
+   "segundos": 16.1,
+   "odl_llamadas": 5,
+   "odl_segundos": 14.6,
+   "guiones_residuales_1k": 0.0,
+   "_libro_id": "eval-ordo-1812-capa"
+  },
+  {
+   "item": "astete-1700-foto",
+   "modo": "ocr",
+   "error": "Error de OCR (imagen): API error occurred: Status 429. Body: {\"object\":\"error\",\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"param\":null,\"code\":\"1300\","
+  },
+  {
+   "item": "constitucion-1978",
+   "modo": "digital",
+   "paginas": 39,
+   "segundos": 70.4,
+   "odl_llamadas": 39,
+   "odl_segundos": 61.0,
+   "guiones_residuales_1k": 0.0,
+   "fuga": 0,
+   "fuga_total": 117,
+   "_libro_id": "eval-constitucion-1978",
+   "recall": 1.0,
+   "mrr": 1.0,
+   "consultas": 5
+  },
+  {
+   "item": "sint-guiones",
+   "modo": "digital",
+   "paginas": 4,
+   "segundos": 5.2,
+   "odl_llamadas": 4,
+   "odl_segundos": 4.8,
+   "guiones_residuales_1k": 0.0,
+   "cer": 0.0,
+   "wer": 0.0,
+   "fuga": 0,
+   "fuga_total": 12,
+   "cortes_rotos": 0,
+   "cortes_total": 9,
+   "_libro_id": "eval-sint-guiones",
+   "recall": 1.0,
+   "mrr": 0.583,
+   "consultas": 4
+  },
+  {
+   "item": "sint-dos-columnas",
+   "modo": "digital",
+   "paginas": 3,
+   "segundos": 4.5,
+   "odl_llamadas": 3,
+   "odl_segundos": 4.1,
+   "guiones_residuales_1k": 0.0,
+   "cer": 0.0,
+   "wer": 0.0,
+   "_libro_id": "eval-sint-dos-columnas",
+   "recall": 1.0,
+   "mrr": 0.75,
+   "consultas": 2
+  },
+  {
+   "item": "sint-tipografia",
+   "modo": "digital",
+   "paginas": 2,
+   "segundos": 2.8,
+   "odl_llamadas": 2,
+   "odl_segundos": 2.7,
+   "guiones_residuales_1k": 0.0,
+   "cer": 0.0,
+   "wer": 0.0,
+   "_libro_id": "eval-sint-tipografia",
+   "recall": 1.0,
+   "mrr": 0.833,
+   "consultas": 4
+  },
+  {
+   "item": "sint-foto-movil",
+   "modo": "geometria",
+   "sesgo_residual": 0.75,
+   "orientacion_ok": false,
+   "tamano": [
+    700,
+    544
+   ]
+  },
+  {
+   "item": "sint-libro",
+   "modo": "digital",
+   "paginas": 3,
+   "segundos": 0.0,
+   "odl_llamadas": 0,
+   "odl_segundos": 0.0,
+   "guiones_residuales_1k": 0.0,
+   "cer": 0.0,
+   "wer": 0.0,
+   "_libro_id": "eval-sint-libro",
+   "recall": 1.0,
+   "mrr": 0.472,
+   "consultas": 3
+  }
+ ],
+ "ocr_llamadas_en_vivo": {}
+}

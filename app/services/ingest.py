@@ -47,6 +47,7 @@ from app.services.ocr import IMAGE_SUFFIXES, OcrNotConfiguredError
 from app.services.storage import Storage, get_storage, safe_filename
 from app.services.text import fold_text
 from app.services.locator import extract_positioned_pdf
+from app.services.cleanup import clean_pages
 
 # Reexportadas para compatibilidad (los tests las importan desde aquí).
 __all__ = [
@@ -274,8 +275,18 @@ def _assemble_libro(
     confianza_media: float | None,
     origen: list[str],
 ) -> dict:
-    """Construye el documento `Libro` (dict) a partir de páginas extraídas."""
+    """Construye el documento `Libro` (dict) a partir de páginas extraídas.
+
+    Con `text_cleanup` (por defecto) limpia el libro completo antes: quita
+    cabeceras/pies/números de página repetidos y guiones de fin de línea,
+    remapeando posiciones de glifos (ver `services/cleanup.py`).
+    """
     now = datetime.now(timezone.utc)
+    if get_settings().text_cleanup:
+        clean_pages(pages)
+        for page in pages:
+            page["conteo_palabras"] = count_words(page.get("texto", ""))
+            page["conteo_caracteres"] = count_chars(page.get("texto", ""))
     if fuente in (FUENTE_PDF_ESCANEADO, FUENTE_IMAGENES):
         ocr_info = OcrInfo(
             motor=motor or "mistral",
