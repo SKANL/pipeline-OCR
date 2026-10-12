@@ -109,6 +109,7 @@ Ojo con el nombre: `AUTH_SECRET` en Render ≠ `AUTH_SECRET` en Vercel.
    | `S3_BUCKET` | nombre del bucket | no |
    | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | token de R2 | sí |
    | `S3_PUBLIC_BASE_URL` | URL pública del bucket, o vacío para URLs firmadas | no |
+   | `S3_PRESIGN_ENDPOINT_URL` | **No definir en producción.** Solo para Docker local (host del navegador ≠ host interno) | no |
    | `AUTH_SECRET` | secreto del token API (paso 3) | sí |
    | `ADMIN_EMAILS` | tu email de Google (coma para varios) | no |
    | `CORS_ORIGINS` | `https://<tu-app>.vercel.app` (más `http://localhost:3010` si hace falta) | no |
