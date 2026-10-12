@@ -19,6 +19,8 @@ os.environ.setdefault(
 
 # Tests use the local backend unless a test builds its own S3Storage.
 os.environ["S3_ENDPOINT_URL"] = ""
+# Tests drive the job queue explicitly (`jobs.run_once`); no background worker.
+os.environ["WORKER_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 from pymongo import MongoClient  # noqa: E402

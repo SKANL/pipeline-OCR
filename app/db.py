@@ -39,6 +39,16 @@ def pages_collection() -> Collection:
     return get_db()["pages"]
 
 
+def jobs_collection() -> Collection:
+    """Colección `trabajos`: cola de ingesta (ver `services/jobs.py`)."""
+    return get_db()["trabajos"]
+
+
+def job_pages_collection() -> Collection:
+    """Colección `trabajo_paginas`: checkpoints por página de un trabajo."""
+    return get_db()["trabajo_paginas"]
+
+
 def ensure_indexes() -> list[str]:
     """Crea los índices requeridos y devuelve sus nombres.
 
@@ -70,4 +80,15 @@ def ensure_indexes() -> list[str]:
             default_language="spanish",
         )
     )
+    jobs = jobs_collection()
+    names.append(jobs.create_index([("estado", ASCENDING), ("disponible_desde", ASCENDING)], name="ix_trabajos_pendientes"))
+    names.append(jobs.create_index([("estado", ASCENDING), ("bloqueado_hasta", ASCENDING)], name="ix_trabajos_lease"))
+    # Idempotencia: un trabajo por contenido (sha256 de los bytes, en orden).
+    names.append(jobs.create_index("sha256", unique=True, name="uq_trabajos_sha256",
+                                   partialFilterExpression={"sha256": {"$type": "string"}}))
+    # Subidas abandonadas (nunca completadas) caducan a las 24 h.
+    names.append(jobs.create_index("creado_en", name="ttl_trabajos_esperando_subida", expireAfterSeconds=86400,
+                                   partialFilterExpression={"estado": "esperando_subida"}))
+    names.append(job_pages_collection().create_index(
+        [("trabajo_id", ASCENDING), ("numero", ASCENDING)], unique=True, name="uq_trabajo_paginas"))
     return names

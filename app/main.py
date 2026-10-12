@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.db import ensure_indexes
 from app.routers import books, citations, ingest, search, upload
+from app.services.jobs import Worker
 from app.services.storage import LocalStorage, get_storage
 
 logger = logging.getLogger(__name__)
@@ -20,12 +21,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Crea los índices al arrancar; si Mongo no responde, el arranque sigue."""
+    """Crea los índices y arranca el worker de la cola (si `WORKER_ENABLED`).
+
+    Si Mongo no responde, el arranque sigue (el worker reintenta solo).
+    """
     try:
         ensure_indexes()
     except Exception as exc:  # noqa: BLE001 - el boot no debe fallar sin Mongo
         logger.warning("No se pudieron crear los índices al arrancar: %s", exc)
+    worker = Worker() if get_settings().worker_enabled else None
+    if worker:
+        worker.start()
     yield
+    if worker:
+        worker.stop()
 
 
 app = FastAPI(

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
@@ -524,6 +525,7 @@ def _pdf_verification(
     libro_id: str,
     storage: Storage,
     native_by_path: dict | None = None,
+    first_page: int = 1,
 ) -> tuple[
     list[str | None],
     dict[int, list[dict]],
@@ -542,7 +544,7 @@ def _pdf_verification(
     image_sizes: list[tuple[int, int] | None] = []
     bloques_por_pagina: dict[int, list[dict]] = {}
     figuras_por_pagina: dict[int, list[dict]] = {}
-    offset = 0
+    offset = first_page - 1
     for pdf_path in pdf_paths:
         arch = structure.extract_structure(pdf_path)
         try:
@@ -615,10 +617,11 @@ def _apply_pdf_verification(
     bloques_por_pagina: dict[int, list[dict]],
     image_sizes: list[tuple[int, int] | None],
     figuras_por_pagina: dict[int, list[dict]],
+    first_page: int = 1,
 ) -> None:
     """Asigna a cada página su `imagen_url`, `bloques`, `figuras` y tamaño."""
     for index, page in enumerate(pages):
-        numero = index + 1
+        numero = first_page + index
         if index < len(image_urls):
             page["imagen_url"] = image_urls[index]
         page["bloques"] = bloques_por_pagina.get(numero, [])
@@ -635,12 +638,14 @@ def _extract_pdf_source(
     libro_id: str,
     capitulos: list[dict],
     storage: Storage,
+    first_page: int = 1,
 ) -> dict:
     """Extrae páginas de uno o más PDF (texto, bloques, imagen y procedencia).
 
     Los digitales usan texto y glifos de PDFium en una sola pasada alineada.
     OpenDataLoader conserva ayudas visuales y cajas aproximadas de respaldo.
     Sin texto nativo se usan los bloques o pdf-inspector, con motor real.
+    `first_page` numera las imágenes/recortes guardados (cola: una página por vez).
     """
     native_by_path = {}
     for pdf_path in pdf_paths:
@@ -650,7 +655,7 @@ def _extract_pdf_source(
             logger.warning("Extracción nativa no disponible para %s: %s", pdf_path.name, exc)
             native_by_path[pdf_path] = []
     image_urls, bloques_por_pagina, image_sizes, figuras_por_pagina = _pdf_verification(
-        pdf_paths, libro_id, storage, native_by_path
+        pdf_paths, libro_id, storage, native_by_path, first_page
     )
 
     pages: list[dict] = []
@@ -658,7 +663,7 @@ def _extract_pdf_source(
     motor: str | None = None
     modelo: str | None = None
     confianzas: list[float] = []
-    numero = 0
+    numero = first_page - 1
 
     for pdf_path in pdf_paths:
         info = pdf_classify.classify_pdf_file(pdf_path)
@@ -714,7 +719,7 @@ def _extract_pdf_source(
         FUENTE_PDF_ESCANEADO if FUENTE_PDF_ESCANEADO in fuentes else FUENTE_PDF_DIGITAL
     )
     _apply_pdf_verification(
-        pages, image_urls, bloques_por_pagina, image_sizes, figuras_por_pagina
+        pages, image_urls, bloques_por_pagina, image_sizes, figuras_por_pagina, first_page
     )
     return {
         "pages": _pages_from_extraction(pages, capitulos),
@@ -730,11 +735,12 @@ def _extract_image_source(
     libro_id: str,
     capitulos: list[dict],
     storage: Storage,
+    first_page: int = 1,
 ) -> dict:
     """Guarda la imagen de cada página y rutea el conjunto a OCR."""
     urls: list[str | None] = []
     sizes: list[tuple[int, int] | None] = []
-    for index, source in enumerate(sources, start=1):
+    for index, source in enumerate(sources, start=first_page):
         png = _page_png_bytes(source.data, source.suffix)
         relative = storage.save_page_image(libro_id, index, png)
         urls.append(relative)
@@ -901,7 +907,7 @@ def ingest_uploaded_files(
         origen=origen,
         **source,
     )
-    _persist(libro, storage)
+    _persist(libro, storage, originals=stored.values())
     return {
         "libro_id": libro_id,
         "books": 1,
@@ -915,8 +921,12 @@ def ingest_uploaded_files(
 # --------------------------------------------------------------------------
 # Persistencia
 # --------------------------------------------------------------------------
-def _persist(libro: dict, storage: Storage) -> None:
-    """Upsert del libro en `books` y de sus páginas en `pages` (con poda)."""
+def _persist(libro: dict, storage: Storage, originals: Iterable[str] = ()) -> None:
+    """Upsert del libro en `books` y de sus páginas en `pages` (con poda).
+
+    `originals` son las claves reales de los originales guardados; se
+    conservan siempre. La poda corre al final: si persistir falla, no borra.
+    """
     now = datetime.now(timezone.utc)
     libro_id = libro["libro_id"]
 
@@ -933,20 +943,21 @@ def _persist(libro: dict, storage: Storage) -> None:
     numeros = [pagina["numero"] for pagina in libro["paginas"]]
     pages = pages_collection()
 
-    # Poda de media: borra todo objeto bajo `{libro_id}/` que el libro nuevo
-    # no referencia (páginas, recortes y originales obsoletos).
-    keep = {f"{libro_id}/{safe_filename(nombre)}" for nombre in libro.get("origen") or []}
-    for pagina in libro["paginas"]:
-        keep.add(pagina.get("imagen_url"))
-        keep.update(f.get("imagen_url") for f in pagina.get("figuras") or [])
-    storage.delete_prefix(f"{libro_id}/", keep={k for k in keep if k})
-
     metadatos = libro.get("metadatos", {})
     for pagina in libro["paginas"]:
         projection = build_page_projection(libro_id, pagina, metadatos)
         pages.update_one({"ref": projection["ref"]}, {"$set": projection}, upsert=True)
 
     pages.delete_many({"libro_id": libro_id, "numero": {"$nin": numeros}})
+
+    # Poda de media: borra todo objeto bajo `{libro_id}/` que el libro nuevo
+    # no referencia (páginas, recortes y originales obsoletos).
+    keep = set(originals)
+    keep.update(f"{libro_id}/{safe_filename(nombre)}" for nombre in libro.get("origen") or [])
+    for pagina in libro["paginas"]:
+        keep.add(pagina.get("imagen_url"))
+        keep.update(f.get("imagen_url") for f in pagina.get("figuras") or [])
+    storage.delete_prefix(f"{libro_id}/", keep={k for k in keep if k})
 
 
 def ingest_book_dir(
