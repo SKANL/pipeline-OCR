@@ -59,6 +59,8 @@ Variables de entorno:
 | `S3_PUBLIC_BASE_URL` | Base pública del bucket; vacío => URLs GET firmadas (1 h) | vacío |
 | `S3_REGION` | Región S3 | `auto` |
 | `MAX_UPLOAD_BYTES` | Límite de tamaño por subida (bytes) | `104857600` |
+| `MAX_FILE_BYTES` | Límite por archivo en subidas firmadas (bytes) | `52428800` |
+| `WORKER_ENABLED` | Worker de la cola de ingesta dentro del proceso de la API | `true` |
 | `PAGE_IMAGE_DPI` | Resolución del render PDF -> PNG | `150` |
 | `API_KEY` | Si no está vacía, `POST /ingest*` exige el header `X-API-Key` | _(vacío)_ |
 | `CORS_ORIGINS` | Orígenes permitidos, separados por coma | `http://localhost:3000,http://localhost:3010` |
@@ -119,6 +121,9 @@ uv run pytest
 |---|---|---|
 | `POST` | `/ingest` | Ingesta un directorio (`{ "root": "..." }`) y devuelve resumen. |
 | `POST` | `/ingest/upload` | Ingesta multipart: `files` (PDF o imágenes), `libro_id` (opcional), `metadatos` (JSON opcional). |
+| `POST` | `/uploads` | URLs PUT firmadas para subir directo al bucket (PWA); idempotente por sha256. |
+| `POST` | `/uploads/{id}/completar` | Verifica los objetos y encola el trabajo de ingesta. |
+| `GET` | `/trabajos/{id}` | Estado del trabajo (`pendiente`, `procesando`, `completado`, `fallido`) y progreso. |
 | `GET` | `/search` | Búsqueda full-text. Params: `q`, `genero`, `autor`, `limit`, `offset`. |
 | `GET` | `/facets` | Facetas de filtros: `{ "generos": [{ "valor", "count" }], "autores": [...] }`. |
 | `GET` | `/books` | Lista de metadatos. Params: `genero`, `autor` (contiene, sin diacríticos), `limit`, `offset`. |

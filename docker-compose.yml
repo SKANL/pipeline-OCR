@@ -3,14 +3,14 @@
 services:
   mongo:
     image: mongo:8.0
-    ports: ["27017:27017"]
+    ports: ["127.0.0.1:27017:27017"]
     volumes: [mongo-data:/data/db]
 
   s3:
     # ponytail: no S3 identities configured, so local access is open; R2 enforces keys in production.
     image: chrislusf/seaweedfs@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
     command: server -dir=/data -s3 -s3.port=9000
-    ports: ["9000:9000"]
+    ports: ["127.0.0.1:9000:9000"]
     volumes: [s3-data:/data]
 
   s3-init:

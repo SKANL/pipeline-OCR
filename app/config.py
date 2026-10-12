@@ -32,7 +32,9 @@ class Settings(BaseSettings):
     s3_bucket: str = ""
     s3_public_base_url: str = ""  # vacío => URLs GET firmadas
     s3_region: str = "auto"
-    max_upload_bytes: int = 104_857_600  # 100 MiB por petición
+    max_upload_bytes: int = 104_857_600  # 100 MiB por petición / subida
+    max_file_bytes: int = 52_428_800  # 50 MiB por archivo (subidas firmadas)
+    worker_enabled: bool = True  # worker de la cola en el mismo proceso
     page_image_dpi: int = 150  # resolución del render PDF -> PNG
     api_key: str = ""  # si está vacía, los endpoints de escritura no exigen auth (dev)
     cors_origins: str = "http://localhost:3000,http://localhost:3010"  # orígenes permitidos, separados por coma

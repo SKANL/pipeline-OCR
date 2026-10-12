@@ -8,6 +8,7 @@ S3-compatible (Cloudflare R2 / SeaweedFS) cuando hay `S3_ENDPOINT_URL` y
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import re
 import tempfile
@@ -18,8 +19,11 @@ from pathlib import Path
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _URL_PREFIX = "/media"
 _GET_EXPIRY = 3600  # ponytail: 1 h presigned GET; set S3_PUBLIC_BASE_URL to avoid expiry
@@ -64,6 +68,10 @@ class Storage(ABC):
     @abstractmethod
     def path(self, key: str) -> Path:
         """Devuelve una ruta local con el contenido de `key`."""
+
+    @abstractmethod
+    def size(self, key: str) -> int | None:
+        """Tamaño en bytes de `key`, o `None` si no existe."""
 
     @abstractmethod
     def presign_put(self, key: str, content_type: str, expires: int = 900) -> str:
@@ -111,6 +119,10 @@ class LocalStorage(Storage):
 
     def url(self, key: str) -> str:
         return f"{_URL_PREFIX}/{key.lstrip('/').replace(chr(92), '/')}"
+
+    def size(self, key: str) -> int | None:
+        path = self.path(key)
+        return path.stat().st_size if path.is_file() else None
 
     def presign_put(self, key: str, content_type: str, expires: int = 900) -> str:
         raise NotImplementedError("Presigned uploads require the S3 backend (S3_ENDPOINT_URL).")
@@ -160,7 +172,11 @@ class S3Storage(Storage):
         for page in pages:
             doomed = [{"Key": o["Key"]} for o in page.get("Contents", []) if o["Key"] not in keep]
             if doomed:
-                self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": doomed})
+                result = self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": doomed})
+                for error in result.get("Errors", []):
+                    # ponytail: logged, not raised; a leftover object only wastes space.
+                    logger.error("S3 delete failed for %s: %s %s", error.get("Key"),
+                                 error.get("Code"), error.get("Message"))
 
     def url(self, key: str) -> str:
         if self.public_base_url:
@@ -168,6 +184,14 @@ class S3Storage(Storage):
         return self.client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=_GET_EXPIRY
         )
+
+    def size(self, key: str) -> int | None:
+        try:
+            return self.client.head_object(Bucket=self.bucket, Key=key)["ContentLength"]
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                return None
+            raise
 
     def presign_put(self, key: str, content_type: str, expires: int = 900) -> str:
         return self.client.generate_presigned_url(

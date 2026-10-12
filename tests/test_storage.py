@@ -97,3 +97,12 @@ def test_seaweedfs_roundtrip() -> None:
     assert storage.get(f"{key}.2") == b"bytes"
     storage.delete_prefix("test-a1/")
     assert "Contents" not in storage.client.list_objects_v2(Bucket=BUCKET, Prefix="test-a1/")
+
+
+def test_s3_delete_prefix_logs_per_key_errors(s3, monkeypatch, caplog) -> None:
+    s3.put("b/paginas/1.png", b"one", "image/png")
+    monkeypatch.setattr(s3.client, "delete_objects", lambda **kw: {
+        "Errors": [{"Key": "b/paginas/1.png", "Code": "AccessDenied", "Message": "nope"}]})
+    with caplog.at_level("ERROR"):
+        s3.delete_prefix("b/")
+    assert "b/paginas/1.png" in caplog.text and "AccessDenied" in caplog.text
