@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.db import ensure_indexes
 from app.routers import books, citations, ingest, search, upload
+from app.services.storage import LocalStorage, get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +57,11 @@ app.include_router(search.router, prefix=API_PREFIX)
 app.include_router(books.router, prefix=API_PREFIX)
 app.include_router(citations.router, prefix=API_PREFIX)
 
-_media_root = Path(get_settings().media_root)
-_media_root.mkdir(parents=True, exist_ok=True)
-app.mount("/media", StaticFiles(directory=str(_media_root)), name="media")
+# `/media` solo existe con el backend local; con S3 las URLs apuntan al bucket.
+if isinstance(get_storage(), LocalStorage):
+    _media_root = Path(get_settings().media_root)
+    _media_root.mkdir(parents=True, exist_ok=True)
+    app.mount("/media", StaticFiles(directory=str(_media_root)), name="media")
 
 
 @app.get("/health", tags=["health"])

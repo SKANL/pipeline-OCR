@@ -109,3 +109,8 @@ def test_hit_bbox_none_when_term_not_in_blocks() -> None:
     assert hit.bbox is None
     assert hit.bloque_idx is None
     assert hit.bbox_norm is None
+
+
+def test_hit_builds_url_from_stored_key() -> None:
+    hit = _hit_from_doc({"ref": "libro-x/pagina/1", "imagen_url": "libro-x/paginas/1.png"}, "x", None)
+    assert hit.imagen_url == "/media/libro-x/paginas/1.png"

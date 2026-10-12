@@ -31,7 +31,8 @@ pipeline output quality is measured and improved.
   - Evidence: `docker compose config` OK, `docker build` OK (38s), pytest pass with MONGODB_URI=mongodb://127.0.0.1:1, render.yaml parses.
 
 ### API
-- [ ] A1 S3-compatible storage service (R2/SeaweedFS) replacing local media writes; media served via public/presigned GET.
+- [x] A1 S3-compatible storage service (R2/SeaweedFS) replacing local media writes; media served via public/presigned GET.
+  - Evidence: RED ImportError S3Storage / pruning + key assertions failing -> GREEN; pytest 108 passed 9 skipped (Mongo off), 117 passed with local Mongo test DB; SeaweedFS roundtrip (presigned PUT+GET) passed. Keys persisted in imagen_url, URLs built at response time; re-ingest prunes stale pages/figures/originals.
 - [ ] A2 Mongo job queue: lease/visibility timeout, attempts + exponential backoff, per-page checkpoints, sha256 idempotency, in-process worker.
 - [ ] A3 Upload flow: presigned PUT, complete -> job, `GET /jobs/{id}`.
 - [ ] A4 Auth: verify PWA-minted token, editors collection, protect writes (API key kept for ops scripts).

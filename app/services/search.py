@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.db import pages_collection
 from app.models import SearchHit
+from app.services.storage import media_url
 from app.services.text import fold_text, make_diacritic_insensitive_pattern
 from app.services.locator import locate_matches, match_ranges, query_units
 
@@ -100,7 +101,7 @@ def _hit_from_doc(doc: dict, query: str, score: float | None) -> SearchHit:
         capitulo_numero=doc.get("capitulo_numero"),
         snippet=make_snippet(doc.get("texto", ""), query),
         score=score,
-        imagen_url=doc.get("imagen_url"),
+        imagen_url=media_url(doc.get("imagen_url")),
         bbox=bbox,
         bloque_idx=bloque_idx,
         bbox_norm=bbox_norm,

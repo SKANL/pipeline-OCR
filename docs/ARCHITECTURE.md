@@ -101,7 +101,7 @@ filtrar/facetar: `genero`, `autor_normalizado`, `titulo`, `autor`.
 | `services/structure.py` | Bloques con bounding box (opendataloader) + `normalize_bbox`. |
 | `services/render.py` | Render de página a PNG y tamaño de página (pypdfium2). |
 | `services/ocr.py` | Cliente Mistral OCR (imagen / lista / PDF). |
-| `services/storage.py` | Almacenamiento de originales e imágenes de página (local, swappable). |
+| `services/storage.py` | Almacenamiento por clave (`{libro_id}/{original}`, `{libro_id}/paginas/{n}.png`, `{libro_id}/figuras/{p}-{i}.png`): local bajo `MEDIA_ROOT` o S3-compatible (R2 en prod, SeaweedFS local) si hay `S3_ENDPOINT_URL` + `S3_BUCKET`. Mongo guarda **claves** en `imagen_url`; la URL se arma al responder (`media_url`: `/media/...` local, `S3_PUBLIC_BASE_URL` + clave o GET firmado). Al re-ingestar se poda todo objeto bajo `{libro_id}/` que el libro nuevo no referencia (páginas, recortes, originales). |
 | `services/text.py` | `fold_text`, patrón diacrítico-insensible, limpieza de Markdown. |
 | `services/naming.py` | `slugify` y orden natural. |
 | `services/search.py` | `search_pages` (`$text`), snippet y bloque coincidente. |

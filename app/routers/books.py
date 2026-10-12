@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from app.config import get_settings
 from app.db import books_collection, pages_collection
@@ -18,7 +18,7 @@ from app.models import (
     PageResponse,
     PageSummary,
 )
-from app.services.storage import get_storage
+from app.services.storage import LocalStorage, get_storage, media_url
 from app.services.text import make_diacritic_insensitive_pattern
 from app.services.locator import locate_matches
 
@@ -113,7 +113,8 @@ def list_pages(
     }
     cursor = pages.find(filtro, projection).sort("numero", 1).skip(offset).limit(limit)
     return PageListResponse(
-        total=total, resultados=[PageSummary(**doc) for doc in cursor]
+        total=total,
+        resultados=[PageSummary(**{**doc, "imagen_url": media_url(doc.get("imagen_url"))}) for doc in cursor],
     )
 
 
@@ -150,11 +151,11 @@ def get_page(libro_id: str, numero: int, q: str | None = Query(None, max_length=
         texto=doc.get("texto", ""),
         conteo_palabras=doc.get("conteo_palabras", 0),
         conteo_caracteres=doc.get("conteo_caracteres", 0),
-        imagen_url=doc.get("imagen_url"),
+        imagen_url=media_url(doc.get("imagen_url")),
         imagen_ancho=doc.get("imagen_ancho"),
         imagen_alto=doc.get("imagen_alto"),
         bloques=doc.get("bloques") or [],
-        figuras=doc.get("figuras") or [],
+        figuras=[{**f, "imagen_url": media_url(f.get("imagen_url"))} for f in doc.get("figuras") or []],
         lectura=doc.get("lectura") or [],
         ref_anterior=ref_anterior,
         ref_siguiente=ref_siguiente,
@@ -166,7 +167,7 @@ def get_page(libro_id: str, numero: int, q: str | None = Query(None, max_length=
 
 
 @router.get("/pages/{libro_id}/pagina/{numero}/imagen")
-def get_page_image(libro_id: str, numero: int) -> FileResponse:
+def get_page_image(libro_id: str, numero: int) -> Response:
     """Devuelve la imagen (PNG) de la página o 404 si no existe."""
     if not _SAFE_LIBRO_ID.match(libro_id):
         raise HTTPException(status_code=400, detail=f"libro_id inválido: {libro_id}")
@@ -180,6 +181,9 @@ def get_page_image(libro_id: str, numero: int) -> FileResponse:
         raise HTTPException(status_code=404, detail=f"Imagen no encontrada: {ref}")
 
     relative = imagen_url.removeprefix("/media/").lstrip("/")
+    storage = get_storage()
+    if not isinstance(storage, LocalStorage):
+        return RedirectResponse(storage.url(relative))
 
     # Defensa en profundidad: resolver contra MEDIA_ROOT y exigir contención.
     root = Path(get_settings().media_root).resolve()
@@ -188,7 +192,7 @@ def get_page_image(libro_id: str, numero: int) -> FileResponse:
         raise HTTPException(status_code=404, detail=f"Imagen no encontrada: {ref}")
 
     try:
-        path = get_storage().path(relative)
+        path = storage.path(relative)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=f"Imagen no encontrada: {ref}") from exc
 

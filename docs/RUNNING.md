@@ -136,3 +136,12 @@ activa en 3010; usar una copia aislada si hace falta build.
   viejo sirve código viejo.
 - **`npm run build` falla** → correrlo con el workdir del repo de la PWA (no desde
   la API).
+
+## Almacenamiento S3 local (opcional)
+
+Sin `S3_ENDPOINT_URL` la API usa `MEDIA_ROOT`. Para probar el backend S3:
+`docker compose up -d` (SeaweedFS en `http://localhost:9000`, bucket
+`biblioteca`, cualquier credencial) y definir `S3_ENDPOINT_URL`, `S3_BUCKET`,
+`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (y opcional `S3_PUBLIC_BASE_URL`).
+`tests/test_storage.py` incluye un roundtrip contra SeaweedFS que se omite si
+`:9000` no responde.

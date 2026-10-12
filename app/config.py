@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     mistral_api_key: str = ""
     mistral_ocr_model: str = "mistral-ocr-latest"
     media_root: str = "./_media"
+    # Almacenamiento S3-compatible (R2 / SeaweedFS); vacío => backend local MEDIA_ROOT
+    s3_endpoint_url: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_bucket: str = ""
+    s3_public_base_url: str = ""  # vacío => URLs GET firmadas
+    s3_region: str = "auto"
     max_upload_bytes: int = 104_857_600  # 100 MiB por petición
     page_image_dpi: int = 150  # resolución del render PDF -> PNG
     api_key: str = ""  # si está vacía, los endpoints de escritura no exigen auth (dev)
