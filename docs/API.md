@@ -4,7 +4,7 @@ Base: `/api/v1`. JSON. Todas las respuestas salvo error son objetos JSON.
 
 ## Autenticación
 
-- Los endpoints de **escritura** (`POST /ingest`, `POST /ingest/upload`) exigen el
+- Los endpoints de **escritura** (`POST /ingest`, `POST /ingest/upload`, `POST /uploads*`) exigen el
   header `X-API-Key` **solo si** `API_KEY` está configurada en el entorno. Si
   `API_KEY` está vacía, quedan abiertos (modo demo).
 - Los endpoints de **lectura** son públicos.
@@ -20,7 +20,10 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
 |---|---|---|
 | `GET` | `/health` | `{ "status": "ok" }`. |
 | `POST` | `/ingest` | Ingesta un directorio del servidor. Body `{ "root": "..." }`. Devuelve resumen. |
-| `POST` | `/ingest/upload` | Ingesta multipart: `files` (PDF o imágenes), `libro_id?`, `metadatos?` (JSON). |
+| `POST` | `/ingest/upload` | Ingesta multipart **síncrona** (operación/local): `files` (PDF o imágenes), `libro_id?`, `metadatos?` (JSON). |
+| `POST` | `/uploads` | Pide URLs PUT firmadas: `{ archivos: [{ nombre, tipo_contenido, tamano, sha256 }], metadatos? }`. |
+| `POST` | `/uploads/{id}/completar` | Verifica (HEAD) los objetos subidos y encola el trabajo (`202`). |
+| `GET` | `/trabajos/{id}` | Estado público del trabajo: `estado`, `progreso`, `error`, `libro_id` (al completar). |
 | `GET` | `/search` | Búsqueda full-text. Params: `q` (oblig.), `genero`, `autor`, `limit` (1–100), `offset`. |
 | `GET` | `/facets` | Facetas: `{ "generos": [{ "valor", "count" }], "autores": [...] }`. |
 | `GET` | `/books` | Lista de metadatos. Params: `genero`, `autor` (contiene, sin diacríticos), `limit`, `offset`. |
@@ -118,6 +121,37 @@ con carga, error, reintento y enlace al original.
 - `413`: subida supera `MAX_UPLOAD_BYTES`.
 - `422`: en `/ingest/upload`, la fuente requiere OCR y falta `MISTRAL_API_KEY`;
   o parámetros fuera de rango. (En `/ingest` ese error va en `errors[]` con `200`.)
+
+### Subidas firmadas y trabajos
+
+Flujo de la PWA (requiere backend S3/R2; con almacenamiento local `/uploads` responde `501`).
+El bucket debe permitir `PUT` por CORS desde el origen de la PWA.
+
+1. `POST /uploads` valida tipos (`application/pdf`, `image/jpeg`, `image/png`, `image/webp`,
+   `text/plain`; un solo tipo por libro; `422`), `MAX_FILE_BYTES` por archivo y `MAX_UPLOAD_BYTES`
+   en total (`413`), y devuelve `201`
+   `{ id, estado, libro_id, existente: false, expira_en, archivos: [{ nombre, clave, url, metodo: "PUT", encabezados }] }`.
+   El cliente hace `PUT url` con los `encabezados` dados (el `Content-Type` va firmado). Las URLs
+   vencen a los 15 min; repetir la llamada con los mismos archivos da URLs nuevas para el mismo `id`.
+2. `POST /uploads/{id}/completar` comprueba que cada objeto exista con el tamaño declarado (`409` si
+   no) y pasa el trabajo a `pendiente`: `202 { trabajo_id, estado }`. Repetirlo es inocuo.
+3. `GET /trabajos/{id}` → `{ id, estado, progreso: { paginas_hechas, paginas_total }, intentos, error, libro_id, creado_en, actualizado_en }`.
+   Consultar con backoff (p. ej. 2 s → 30 s).
+
+Estados: `esperando_subida` → `pendiente` → `procesando` → `completado` | `fallido`. Un fallo
+transitorio vuelve a `pendiente` con backoff; `error` es un mensaje público, sin detalles internos.
+El id de la subida es el id del trabajo.
+
+**Idempotencia**: la clave es el `sha256` del contenido (un archivo: su sha256; varios: sha256 de sus
+sha256 en el orden enviado). Volver a subir los mismos bytes devuelve `200` con `existente: true`, el
+`id` y el `libro_id`, sin URLs ni duplicados. Si el trabajo previo quedó `fallido`, se reabre con URLs
+nuevas. `libro_id` = `slug(titulo o nombre)-{sha256[:8]}`. El worker recalcula el sha256: si no
+coincide con el declarado, el trabajo falla sin reintentos.
+
+Varias imágenes (fotos de páginas) forman un solo libro con las páginas **en el orden enviado**.
+
+`/ingest/upload` (multipart) sigue siendo síncrono a propósito: es la vía de scripts de operación y
+del backend local; la PWA usa `/uploads`, que no retiene bytes ni la petición en la API.
 
 ### Comportamiento de arranque y subida
 

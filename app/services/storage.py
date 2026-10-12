@@ -18,6 +18,7 @@ from pathlib import Path
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from app.config import get_settings
 
@@ -66,6 +67,10 @@ class Storage(ABC):
         """Devuelve una ruta local con el contenido de `key`."""
 
     @abstractmethod
+    def size(self, key: str) -> int | None:
+        """Tamaño en bytes de `key`, o `None` si no existe."""
+
+    @abstractmethod
     def presign_put(self, key: str, content_type: str, expires: int = 900) -> str:
         """URL firmada para subir `key` directamente con PUT."""
 
@@ -111,6 +116,10 @@ class LocalStorage(Storage):
 
     def url(self, key: str) -> str:
         return f"{_URL_PREFIX}/{key.lstrip('/').replace(chr(92), '/')}"
+
+    def size(self, key: str) -> int | None:
+        path = self.path(key)
+        return path.stat().st_size if path.is_file() else None
 
     def presign_put(self, key: str, content_type: str, expires: int = 900) -> str:
         raise NotImplementedError("Presigned uploads require the S3 backend (S3_ENDPOINT_URL).")
@@ -168,6 +177,14 @@ class S3Storage(Storage):
         return self.client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=_GET_EXPIRY
         )
+
+    def size(self, key: str) -> int | None:
+        try:
+            return self.client.head_object(Bucket=self.bucket, Key=key)["ContentLength"]
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                return None
+            raise
 
     def presign_put(self, key: str, content_type: str, expires: int = 900) -> str:
         return self.client.generate_presigned_url(

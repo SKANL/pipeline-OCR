@@ -108,6 +108,36 @@ filtrar/facetar: `genero`, `autor_normalizado`, `titulo`, `autor`.
 | `services/locator.py` | Texto/glifos nativos, Unicode con índices originales, coincidencias literales y precisión explícita. |
 | `services/pdf_layout.py` | Layout nativo de PDFium: orden de lectura y composición de ayudas visuales. |
 | `services/citation.py` | Citas APA / Chicago / MLA. |
+| `services/jobs.py` | Cola Mongo de trabajos de ingesta + worker en proceso. |
+| `routers/jobs.py` | Subidas con URL firmada (`/uploads`) y estado (`/trabajos`). |
+
+## Cola de trabajos (`services/jobs.py`)
+
+Render free no tiene workers aparte y duerme tras 15 min sin HTTP entrante, así que la cola vive en
+Mongo (`trabajos`) y un **hilo worker por instancia** (arrancado en el `lifespan`, `WORKER_ENABLED`)
+la drena:
+
+- **Claim atómico** (`find_one_and_update`): un trabajo `pendiente` con `disponible_desde <= ahora`,
+  o uno `procesando` cuyo lease (`bloqueado_hasta`) venció porque la instancia durmió o cayó. Cada
+  claim suma un intento.
+- **Lease + heartbeat**: lease de 5 min, renovado tras cada página junto con `progreso`. Si otro
+  worker tomó el trabajo, el anterior se detiene (`LeaseLost`).
+- **Reintentos**: error transitorio → `pendiente` con backoff exponencial + jitter
+  (30 s · 2^(n-1) · [1, 2), tope 1 h). `ValueError` (validación, sha256 distinto) y OCR no
+  configurado son permanentes. Tras `max_intentos` (5) → `fallido`; también un trabajo que se cae
+  en bucle sin intentos restantes.
+- **Checkpoints por página** (`trabajo_paginas`): cada página terminada se guarda y un reintento
+  salta las ya hechas. Un PDF se corta en PDFs de una página y cada uno pasa por los mismos builders
+  (`_extract_pdf_source` / `_extract_image_source`, parámetro `first_page`): memoria acotada a una
+  página. Al final se arma el libro, se persiste (`_persist`) y se borran los checkpoints.
+- **Idempotencia**: índice único parcial sobre `trabajos.sha256`; las subidas nunca completadas
+  caducan a las 24 h (TTL parcial sobre `estado: esperando_subida`).
+
+**Techos**: un worker por instancia y un trabajo a la vez. Si Render duerme a mitad de un trabajo,
+este sigue cuando la instancia despierta (próxima petición HTTP) y el lease venció; cada reinicio
+consume un intento. Para que la cola avance sin tráfico, un ping externo a `/health` cada ~10 min
+(cron-job.org, GitHub Actions) mantiene la instancia despierta (las 750 h/mes gratis alcanzan para
+un servicio). Con opendataloader activo, cada página arranca la JVM: lento con 0.1 CPU.
 
 ## Límites conocidos / escalado
 

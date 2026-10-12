@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db import ensure_indexes
-from app.routers import books, citations, ingest, search, upload
+from app.routers import books, citations, ingest, jobs, search, upload
 from app.services.jobs import Worker
 from app.services.storage import LocalStorage, get_storage
 
@@ -62,6 +62,7 @@ API_PREFIX = "/api/v1"
 
 app.include_router(ingest.router, prefix=API_PREFIX)
 app.include_router(upload.router, prefix=API_PREFIX)
+app.include_router(jobs.router, prefix=API_PREFIX)
 app.include_router(search.router, prefix=API_PREFIX)
 app.include_router(books.router, prefix=API_PREFIX)
 app.include_router(citations.router, prefix=API_PREFIX)
