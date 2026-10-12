@@ -27,6 +27,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -167,6 +169,8 @@ def extract_structure(
     Nunca lanza: ante cualquier fallo (JVM ausente, error del conversor)
     registra el problema y devuelve mapas vacíos.
     """
+    if not get_settings().opendataloader_enabled:  # PDFium-only mode: no JVM, no visual aids
+        return {"bloques": {}, "figuras": {}}
     pdf_path = Path(pdf_path)
     work_dir = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="odl_"))
     cleanup = output_dir is None
