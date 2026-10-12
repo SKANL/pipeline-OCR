@@ -17,6 +17,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.config import get_settings
 from app.db import jobs_collection
+from app.ratelimit import limit_write
 from app.security import require_editor
 from app.services import jobs
 from app.services import storage as storage_service
@@ -74,7 +75,7 @@ def _presigned(job: dict, storage) -> dict:
     }
 
 
-@router.post("/uploads", status_code=201)
+@router.post("/uploads", status_code=201, dependencies=[Depends(limit_write)])
 def create_upload(payload: SubidaRequest, response: Response, editor: dict = Depends(require_editor)) -> dict:
     """Devuelve URLs PUT firmadas, o el trabajo/libro existente si el contenido ya se subió."""
     _validate(payload.archivos)
@@ -113,7 +114,7 @@ def create_upload(payload: SubidaRequest, response: Response, editor: dict = Dep
             "existente": True, "expira_en": None, "archivos": []}
 
 
-@router.post("/uploads/{upload_id}/completar", status_code=202, dependencies=[Depends(require_editor)])
+@router.post("/uploads/{upload_id}/completar", status_code=202, dependencies=[Depends(limit_write), Depends(require_editor)])
 def complete_upload(upload_id: str) -> dict:
     """Verifica (HEAD) que cada objeto exista con el tamaño declarado y encola el trabajo."""
     job = jobs.get_job(upload_id)

@@ -6,6 +6,8 @@ dependencia y el path traversal se valida antes de leer de disco.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -147,7 +149,10 @@ def test_cors_default_allows_pwa_port(client: TestClient) -> None:
 
 
 @pytest.mark.parametrize("root", ["no/existe/jamas", "pyproject.toml"])
-def test_ingest_rejects_bad_root(client: TestClient, root: str) -> None:
+def test_ingest_rejects_bad_root(client: TestClient, root: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INGEST_ALLOWED_ROOTS", str(Path.cwd().resolve()))
+    get_settings.cache_clear()
     response = client.post("/api/v1/ingest", json={"root": root})
     assert response.status_code == 400
+    get_settings.cache_clear()
     assert "raíz" in response.json()["detail"]

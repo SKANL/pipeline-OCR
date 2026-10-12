@@ -22,6 +22,7 @@ from app.models import (
     PageResponse,
     PageSummary,
 )
+from app.ratelimit import limit_write
 from app.security import require_editor
 from app.services import storage as storage_service
 from app.services.storage import LocalStorage, get_storage, media_url
@@ -241,7 +242,7 @@ def _safe_id(libro_id: str) -> str:
     return libro_id
 
 
-@router.patch("/books/{libro_id}", dependencies=[Depends(require_editor)])
+@router.patch("/books/{libro_id}", dependencies=[Depends(limit_write), Depends(require_editor)])
 def update_book(libro_id: str, payload: LibroPatch) -> dict:
     """Edit metadata; `titulo`/`idioma`/`temas` cannot be null."""
     changes = payload.model_dump(exclude_unset=True)
@@ -259,7 +260,7 @@ def update_book(libro_id: str, payload: LibroPatch) -> dict:
     return get_book(libro_id)
 
 
-@router.delete("/books/{libro_id}", status_code=204, dependencies=[Depends(require_editor)])
+@router.delete("/books/{libro_id}", status_code=204, dependencies=[Depends(limit_write), Depends(require_editor)])
 def delete_book(libro_id: str) -> Response:
     """Delete the book, its pages, its jobs + checkpoints and its media prefix. Idempotent."""
     _safe_id(libro_id)
@@ -272,7 +273,7 @@ def delete_book(libro_id: str) -> Response:
     return Response(status_code=204)
 
 
-@router.post("/books/{libro_id}/reprocesar", status_code=202, dependencies=[Depends(require_editor)])
+@router.post("/books/{libro_id}/reprocesar", status_code=202, dependencies=[Depends(limit_write), Depends(require_editor)])
 def reprocess_book(libro_id: str) -> dict:
     """Requeue the book's ingest job from its stored originals, keeping edited metadata."""
     book = books_collection().find_one({"libro_id": libro_id}, {"metadatos": 1})

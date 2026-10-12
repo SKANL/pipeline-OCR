@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.db import editors_collection
+from app.ratelimit import limit_write
 from app.security import bearer_email, require_admin, role_of
 
 router = APIRouter(tags=["editores"])
@@ -28,12 +29,12 @@ def me(request: Request) -> dict:
     return {"email": email, "rol": role_of(email)}
 
 
-@router.get("/editores", dependencies=[Depends(require_admin)])
+@router.get("/editores", dependencies=[Depends(limit_write), Depends(require_admin)])
 def list_editors() -> list[dict]:
     return list(editors_collection().find({}, {"_id": 0}).sort("email", 1))
 
 
-@router.post("/editores", status_code=201, dependencies=[Depends(require_admin)])
+@router.post("/editores", status_code=201, dependencies=[Depends(limit_write), Depends(require_admin)])
 def add_editor(payload: EditorRequest) -> dict:
     email = payload.email.strip().lower()
     editors_collection().update_one(
@@ -44,7 +45,7 @@ def add_editor(payload: EditorRequest) -> dict:
     return {"email": email, "rol": payload.rol}
 
 
-@router.delete("/editores/{email}", status_code=204, dependencies=[Depends(require_admin)])
+@router.delete("/editores/{email}", status_code=204, dependencies=[Depends(limit_write), Depends(require_admin)])
 def remove_editor(email: str) -> Response:
     editors_collection().delete_one({"email": email.strip().lower()})
     return Response(status_code=204)

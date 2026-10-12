@@ -139,6 +139,15 @@ consume un intento. Para que la cola avance sin tráfico, un ping externo a `/he
 (cron-job.org, GitHub Actions) mantiene la instancia despierta (las 750 h/mes gratis alcanzan para
 un servicio). Con opendataloader activo, cada página arranca la JVM: lento con 0.1 CPU.
 
+## Seguridad de escritura
+
+- `app/security.py`: `require_editor` acepta token Bearer HS256 de la PWA (Auth.js + Google; ver
+  `docs/API.md`) o `X-API-Key`; `require_admin` para `/editores` y `POST /ingest`. Roles desde
+  `ADMIN_EMAILS` o la colección `editores`. Los libros y trabajos guardan `creado_por` (email).
+- `app/ratelimit.py`: token bucket en memoria por cliente (búsqueda generosa, escrituras estrictas),
+  `429` + `Retry-After`. Techo: por instancia.
+- `POST /ingest` confinado a `INGEST_ALLOWED_ROOTS` (rutas reales); deshabilitado si no se configura.
+
 ## Límites conocidos / escalado
 
 - **MongoDB Atlas M0**: 512 MB duros (incluye índices) → tier de demo, no de

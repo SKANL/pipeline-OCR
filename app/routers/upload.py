@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.config import get_settings
 from app.db import books_collection
+from app.ratelimit import limit_write
 from app.security import require_editor
 from app.services.ingest import UploadedFileData, ingest_uploaded_files
 from app.services.ocr import OcrNotConfiguredError
@@ -19,7 +20,7 @@ from app.services.ocr import OcrNotConfiguredError
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(limit_write)])
 def ingest_upload(
     files: list[UploadFile] = File(..., description="Uno o más PDF, o solo imágenes."),
     libro_id: str | None = Form(None),

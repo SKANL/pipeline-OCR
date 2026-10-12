@@ -17,5 +17,8 @@ services:
       - {key: S3_SECRET_ACCESS_KEY, sync: false}
       - {key: S3_BUCKET, sync: false}
       - {key: S3_PUBLIC_BASE_URL, sync: false}
-      # Consumed in the auth tasks (A4-A6)
-      - {key: AUTH_SECRET, sync: false}
+      # Auth + limits (A4-A6)
+      - {key: AUTH_SECRET, sync: false}  # same value as the PWA's API token secret
+      - {key: ADMIN_EMAILS, sync: false}
+      - {key: TRUST_PROXY_HEADERS, value: "true"}  # Render proxies requests; real IP is in X-Forwarded-For
+      - {key: INGEST_ALLOWED_ROOTS, value: ""}  # empty => POST /ingest disabled (use presigned uploads)
