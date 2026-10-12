@@ -763,7 +763,7 @@ def _extract_image_source(
         for index, source in enumerate(sources, start=first_page):
             if preprocess:
                 png = scan.preprocess_image(source.data)
-                path = Path(tmp) / f"pagina-{index}.png"
+                path = Path(tmp) / f"{index}-{source.path.stem}.png"  # keeps order + name
                 path.write_bytes(png)
             else:
                 png, path = _page_png_bytes(source.data, source.suffix), source.path
