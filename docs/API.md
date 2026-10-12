@@ -38,9 +38,10 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
 | `GET` | `/health` | `{ "status": "ok" }`. |
 | `POST` | `/ingest` | Ingesta un directorio del servidor. Body `{ "root": "..." }`. Devuelve resumen. |
 | `POST` | `/ingest/upload` | Ingesta multipart **síncrona** (operación/local): `files` (PDF o imágenes), `libro_id?`, `metadatos?` (JSON). |
-| `POST` | `/uploads` | Pide URLs PUT firmadas: `{ archivos: [{ nombre, tipo_contenido, tamano, sha256 }], metadatos?, ocr_proveedor? }`. `ocr_proveedor` (`tesseract` \| `mistral` \| `glm`, `422` si no existe) fija el OCR de ese trabajo; omitido usa `OCR_PROVIDER`. |
+| `POST` | `/uploads` | Pide URLs PUT firmadas: `{ archivos: [{ nombre, tipo_contenido, tamano, sha256, titulo? }], metadatos?, ocr_proveedor? }`; PDF/TXT: un trabajo por archivo (`trabajos`). `ocr_proveedor` (`tesseract` \| `mistral` \| `glm`, `422` si no existe) fija el OCR de ese trabajo; omitido usa `OCR_PROVIDER`. |
 | `POST` | `/uploads/{id}/completar` | Verifica (HEAD) los objetos subidos y encola el trabajo (`202`). |
-| `GET` | `/trabajos/{id}` | Estado público del trabajo: `estado`, `progreso`, `error`, `libro_id` (al completar). |
+| `GET` | `/trabajos/{id}` | Estado público del trabajo: `titulo`, `estado`, `etapa`, `progreso`, `error`, `libro_id` (al completar). |
+| `GET` | `/trabajos?limit=20` | Editor: sus trabajos recientes (admin: todos). |
 | `GET` | `/yo` | `{ email, rol }` del token Bearer (`rol` null si no es editor); 401 sin token. |
 | `GET` | `/editores` | Admin: lista `[{ email, rol, creado }]`. |
 | `POST` | `/editores` | Admin: alta/cambio `{ email, rol: "editor"|"admin" }` (`201`). |
@@ -151,28 +152,59 @@ con carga, error, reintento y enlace al original.
 Flujo de la PWA (requiere backend S3/R2; con almacenamiento local `/uploads` responde `501`).
 El bucket debe permitir `PUT` por CORS desde el origen de la PWA.
 
-1. `POST /uploads` valida tipos (`application/pdf`, `image/jpeg`, `image/png`, `image/webp`,
-   `text/plain`; un solo tipo por libro; `422`), `MAX_FILE_BYTES` por archivo y `MAX_UPLOAD_BYTES`
-   en total (`413`), y devuelve `201`
-   `{ id, estado, libro_id, existente: false, expira_en, archivos: [{ nombre, clave, url, metodo: "PUT", encabezados }] }`.
-   El cliente hace `PUT url` con los `encabezados` dados (el `Content-Type` va firmado). Las URLs
-   vencen a los 15 min; repetir la llamada con los mismos archivos da URLs nuevas para el mismo `id`.
-2. `POST /uploads/{id}/completar` comprueba que cada objeto exista con el tamaño declarado (`409` si
-   no) y pasa el trabajo a `pendiente`: `202 { trabajo_id, estado }`. Repetirlo es inocuo.
-3. `GET /trabajos/{id}` → `{ id, estado, progreso: { paginas_hechas, paginas_total }, intentos, error, libro_id, creado_en, actualizado_en }`.
-   Consultar con backoff (p. ej. 2 s → 30 s).
+1. `POST /uploads` `{ archivos: [{ nombre, tipo_contenido, tamano, sha256, titulo? }], metadatos?, ocr_proveedor? }`
+   valida tipos (`application/pdf`, `image/jpeg`, `image/png`, `image/webp`, `text/plain`; mezclar
+   imágenes con documentos da `422`), `MAX_FILE_BYTES` por archivo y `MAX_UPLOAD_BYTES` en total (`413`).
+   - **PDF/TXT**: un trabajo (y un libro) **por archivo**. `titulo` del archivo, o `metadatos.titulo`
+     si hay un solo archivo, o el nombre del archivo sin extensión (`_`/`-` → espacios).
+   - **Imágenes** (fotos de páginas): un solo trabajo/libro con las páginas **en el orden enviado**;
+     título = `metadatos.titulo` o el nombre del primer archivo.
+   - `metadatos` (`autor`, `genero`, `anio`) se aplican a todos los libros.
+
+   Respuesta `201` (o `200` si todos los trabajos ya existían):
+   ```json
+   {
+     "id": "…", "titulo": "…", "estado": "esperando_subida", "etapa": "subiendo", "libro_id": "…",
+     "existente": false, "expira_en": "…", "archivos": ["…"],
+     "trabajos": [
+       { "id": "665f…", "titulo": "mi libro uno", "estado": "esperando_subida", "etapa": "subiendo",
+         "libro_id": "mi-libro-uno-1a2b3c4d", "existente": false, "expira_en": "2026-10-12T18:15:00+00:00",
+         "archivos": [{ "nombre": "mi_libro-uno.pdf", "clave": "mi-libro-uno-1a2b3c4d/000-mi_libro-uno.pdf",
+                        "url": "https://…", "metodo": "PUT", "encabezados": { "Content-Type": "application/pdf" } }] },
+       { "id": "6660…", "titulo": "Libro Dos", "estado": "completado", "etapa": "disponible",
+         "libro_id": "libro-dos-9f8e7d6c", "existente": true, "expira_en": null, "archivos": [] }
+     ]
+   }
+   ```
+   Los campos de nivel superior repiten `trabajos[0]` (compatibilidad). El cliente hace `PUT url` con los
+   `encabezados` dados (el `Content-Type` va firmado). Las URLs vencen a los 15 min; repetir la llamada
+   con los mismos archivos da URLs nuevas para los mismos `id`.
+2. `POST /uploads/{id}/completar` (uno por trabajo) comprueba que cada objeto exista con el tamaño
+   declarado (`409` si no) y pasa el trabajo a `pendiente`: `202 { trabajo_id, estado }`. Repetirlo es inocuo.
+3. `GET /trabajos/{id}` →
+   ```json
+   { "id": "…", "titulo": "Libro Dos", "estado": "procesando", "etapa": "leyendo_paginas",
+     "progreso": { "paginas_hechas": 3, "paginas_total": 40 }, "intentos": 1, "error": null,
+     "libro_id": null, "creado_en": "…", "actualizado_en": "…" }
+   ```
+   `libro_id` solo al completar. Consultar con backoff (p. ej. 2 s → 30 s).
+4. `GET /trabajos?limit=20` (editor; `limit` 1–100) → lista con la misma forma que `GET /trabajos/{id}`,
+   del más nuevo al más viejo: los trabajos del editor (`creado_por`); un admin ve todos.
 
 Estados: `esperando_subida` → `pendiente` → `procesando` → `completado` | `fallido`. Un fallo
 transitorio vuelve a `pendiente` con backoff; `error` es un mensaje público, sin detalles internos.
 El id de la subida es el id del trabajo.
 
-**Idempotencia**: la clave es el `sha256` del contenido (un archivo: su sha256; varios: sha256 de sus
-sha256 en el orden enviado). Volver a subir los mismos bytes devuelve `200` con `existente: true`, el
-`id` y el `libro_id`, sin URLs ni duplicados. Si el trabajo previo quedó `fallido`, se reabre con URLs
-nuevas. `libro_id` = `slug(titulo o nombre)-{sha256[:8]}`. El worker recalcula el sha256: si no
-coincide con el declarado, el trabajo falla sin reintentos.
+**Etapas** (`etapa`, para mostrar al usuario): `subiendo` (archivos aún no recibidos) → `en_espera`
+(en cola, también esperando un reintento) → `leyendo_paginas` (ver `progreso`) → `preparando_busqueda`
+(guardando e indexando) → `disponible` (con `libro_id`) | `fallido` (con `error`). Los trabajos
+anteriores sin `etapa` la derivan de `estado`.
 
-Varias imágenes (fotos de páginas) forman un solo libro con las páginas **en el orden enviado**.
+**Idempotencia**: la clave de cada trabajo es el `sha256` de su contenido (un archivo: su sha256; varias
+imágenes: sha256 de sus sha256 en el orden enviado). Volver a subir los mismos bytes devuelve ese trabajo
+con `existente: true`, su `id` y `libro_id`, sin URLs ni duplicados. Si el trabajo previo quedó
+`fallido`, se reabre con URLs nuevas. `libro_id` = `slug(titulo)-{sha256[:8]}`. El worker recalcula el
+sha256: si no coincide con el declarado, el trabajo falla sin reintentos.
 
 `/ingest/upload` (multipart) sigue siendo síncrono a propósito: es la vía de scripts de operación y
 del backend local; la PWA usa `/uploads`, que no retiene bytes ni la petición en la API.

@@ -60,6 +60,30 @@ CONTENT_TYPES = {
 
 _INTERNAL_ERROR = "Error interno al procesar el libro."
 
+# User-facing step per job; fallback for jobs created before `etapa` existed.
+_ETAPA_BY_ESTADO = {"esperando_subida": "subiendo", "pendiente": "en_espera",
+                    "procesando": "leyendo_paginas", "completado": "disponible", "fallido": "fallido"}
+
+
+def etapa_of(job: dict) -> str:
+    return job.get("etapa") or _ETAPA_BY_ESTADO.get(job["estado"], "en_espera")
+
+
+def public_status(job: dict) -> dict:
+    """Job fields safe to show users (no internals)."""
+    return {
+        "id": str(job["_id"]),
+        "titulo": job.get("titulo") or (job.get("metadatos") or {}).get("titulo"),
+        "estado": job["estado"],
+        "etapa": etapa_of(job),
+        "progreso": job.get("progreso"),
+        "intentos": job.get("intentos", 0),
+        "error": job.get("error"),
+        "libro_id": job["libro_id"] if job["estado"] == "completado" else None,
+        "creado_en": job.get("creado_en"),
+        "actualizado_en": job.get("actualizado_en"),
+    }
+
 
 class LeaseLost(Exception):
     """Another worker owns the job now (our lease expired)."""
@@ -87,12 +111,14 @@ def upload_digest(sha256s: list[str]) -> str:
 
 def create_job(*, libro_id: str, archivos: list[dict], metadatos: dict | None,
                estado: str = "esperando_subida", creado_por: str | None = None,
-               ocr_proveedor: str | None = None) -> str:
+               ocr_proveedor: str | None = None, titulo: str | None = None) -> str:
     """Insert a job; `archivos` carry nombre/tipo_contenido/tamano/sha256/clave."""
     now = _now()
     result = jobs_collection().insert_one({
         "tipo": "ingesta",
         "estado": estado,
+        "etapa": _ETAPA_BY_ESTADO[estado],
+        "titulo": titulo,
         "libro_id": libro_id,
         "archivos": archivos,
         "metadatos": metadatos or {},
@@ -131,7 +157,7 @@ def claim(worker_id: str) -> dict | None:
             "$expr": {"$lt": ["$intentos", "$max_intentos"]},
         },
         {
-            "$set": {"estado": "procesando", "worker_id": worker_id,
+            "$set": {"estado": "procesando", "etapa": "leyendo_paginas", "worker_id": worker_id,
                      "bloqueado_hasta": now + LEASE, "actualizado_en": now},
             "$inc": {"intentos": 1},
         },
@@ -144,11 +170,11 @@ def _owned(job: dict) -> dict:
     return {"_id": job["_id"], "worker_id": job["worker_id"], "estado": "procesando"}
 
 
-def heartbeat(job: dict, *, paginas_hechas: int, paginas_total: int) -> None:
+def heartbeat(job: dict, *, paginas_hechas: int, paginas_total: int, etapa: str = "leyendo_paginas") -> None:
     """Extend the lease and record progress; raise `LeaseLost` if not ours."""
     now = _now()
     result = jobs_collection().update_one(_owned(job), {"$set": {
-        "bloqueado_hasta": now + LEASE, "actualizado_en": now,
+        "bloqueado_hasta": now + LEASE, "actualizado_en": now, "etapa": etapa,
         "progreso": {"paginas_hechas": paginas_hechas, "paginas_total": paginas_total},
     }})
     if result.matched_count == 0:
@@ -179,16 +205,16 @@ def fail(job: dict, exc: Exception) -> None:
     update = {"error": public, "error_interno": repr(exc)[:2000], "actualizado_en": now,
               "bloqueado_hasta": None}
     if permanent or job["intentos"] >= job["max_intentos"]:
-        update["estado"] = "fallido"
+        update["estado"] = update["etapa"] = "fallido"
     else:
-        update["estado"] = "pendiente"
+        update["estado"], update["etapa"] = "pendiente", "en_espera"
         update["disponible_desde"] = now + timedelta(seconds=backoff_seconds(job["intentos"]))
     jobs_collection().update_one(_owned(job), {"$set": update})
 
 
 def complete(job: dict, *, paginas: int) -> None:
     result = jobs_collection().update_one(_owned(job), {"$set": {
-        "estado": "completado", "error": None, "bloqueado_hasta": None, "actualizado_en": _now(),
+        "estado": "completado", "etapa": "disponible", "error": None, "bloqueado_hasta": None, "actualizado_en": _now(),
         "progreso": {"paginas_hechas": paginas, "paginas_total": paginas},
     }})
     if result.matched_count == 0:
@@ -201,7 +227,7 @@ def _sweep_exhausted() -> None:
     jobs_collection().update_many(
         {"estado": "procesando", "bloqueado_hasta": {"$lt": now},
          "$expr": {"$gte": ["$intentos", "$max_intentos"]}},
-        {"$set": {"estado": "fallido", "bloqueado_hasta": None, "actualizado_en": now,
+        {"$set": {"estado": "fallido", "etapa": "fallido", "bloqueado_hasta": None, "actualizado_en": now,
                   "error": "El procesamiento se interrumpió demasiadas veces."}},
     )
 
@@ -334,7 +360,7 @@ def _process_pages(job: dict) -> int:
     if job.get("creado_por"):
         libro["creado_por"] = job["creado_por"]
     # ponytail: re-check the lease right before writing; a steal inside _persist itself still races.
-    heartbeat(job, paginas_hechas=total, paginas_total=total)
+    heartbeat(job, paginas_hechas=total, paginas_total=total, etapa="preparando_busqueda")
     ingest._persist(libro, storage, originals=[a["clave"] for a in archivos])
     checkpoints.delete_many({"trabajo_id": job["_id"]})
     return total
