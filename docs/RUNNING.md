@@ -16,7 +16,14 @@ Biblioteca: http://localhost:3010/biblioteca.
 La PWA vive en el repo **hermano**: `..\biblioteca-eclesiastica-web`
 (`C:\code\biblioteca-eclesiastica-web`).
 
-## 1. MongoDB
+## 1. MongoDB (y MinIO)
+
+```powershell
+docker compose up -d   # Mongo :27017, MinIO :9000 (consola :9001, minioadmin/minioadmin), bucket `biblioteca` público
+docker compose down    # detener (los volúmenes se conservan)
+```
+
+Alternativa solo Mongo:
 
 ```powershell
 docker run -d --name biblio-mongo -p 27017:27017 mongo:8

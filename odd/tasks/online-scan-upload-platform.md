@@ -27,7 +27,8 @@ pipeline output quality is measured and improved.
 
 ## Tasks
 ### Infra
-- [ ] I1 Local docker compose (Mongo + MinIO), API Dockerfile (uv + Java) for Render, render.yaml, env docs.
+- [x] I1 Local docker compose (Mongo + MinIO), API Dockerfile (uv + Java) for Render, render.yaml, env docs.
+  - Evidence: `docker compose config` OK, `docker build` OK (38s), pytest pass with MONGODB_URI=mongodb://127.0.0.1:1, render.yaml parses.
 
 ### API
 - [ ] A1 S3-compatible storage service (R2/MinIO) replacing local media writes; media served via public/presigned GET.
