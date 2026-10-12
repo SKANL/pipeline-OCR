@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 104_857_600  # 100 MiB por petición / subida
     max_file_bytes: int = 52_428_800  # 50 MiB por archivo (subidas firmadas)
     worker_enabled: bool = True  # worker de la cola en el mismo proceso
+    text_cleanup: bool = True  # quitar cabeceras/pies repetidos y guiones de fin de línea al armar el libro
+    scan_preprocess: bool = True  # imágenes: EXIF, grises, contraste, enderezado y recorte antes del OCR
     page_image_dpi: int = 150  # resolución del render PDF -> PNG
     api_key: str = ""  # si está vacía, los endpoints de escritura no exigen auth (dev)
     auth_secret: str = ""  # HS256 secret shared with the PWA (bearer tokens); empty => no bearer auth

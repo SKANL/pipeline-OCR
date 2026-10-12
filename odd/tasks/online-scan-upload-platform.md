@@ -51,10 +51,16 @@ pipeline output quality is measured and improved.
   - Evidence: RED 2 snippet escape tests failing -> GREEN; pytest 110 passed 9 skipped (Mongo off), 119 passed with local Mongo test DB. PWA snippetToSafeHtml re-escapes -> visible &amp;lt; / &amp;amp; until a PWA task decodes-or-trusts the API snippet.
 
 ### Pipeline quality
-- [ ] P1 Corpus: 5 real public-domain + 5 synthetic files with ground truth; CER/WER evaluation harness and baseline report.
-- [ ] P2 Text cleanup: de-hyphenation, repeated header/footer removal, ligature/quote normalization.
-- [ ] P3 Scan preprocessing (deskew, crop, contrast) before OCR for images.
-- [ ] P4 Search relevance improvements on `$text` (phrases, ranking); measure on corpus.
+- [x] P1 Corpus: 5 real public-domain + 5 synthetic files with ground truth; CER/WER evaluation harness and baseline report.
+  - Evidence: commit d620c5c. Real: astete-1787 (Wikisource GT), molinero-1695, ordo-1812, astete-1700 photo, BOE Constitution (born-digital, art. 13 LPI). Synthetic generator `tests/tools/make_eval_corpus.py`; harness `tests/tools/evaluate_corpus.py`; metrics tested (`tests/test_eval_metrics.py`). Baseline in `docs/EVALUACION_PIPELINE.md`. GAP: Mistral 429 on every call -> OCR rows empty, 0 pages consumed.
+- [x] P2 Text cleanup: de-hyphenation, repeated header/footer removal, ligature/quote normalization.
+  - Evidence: commit 0d4d899. RED ImportError + inline-compound regression test -> GREEN. Leakage 116/117 -> 0 (BOE), splits 9/9 -> 0, astete layer WER 0.296 -> 0.256. Deletion-only cleanup with remapped `posiciones`/`lectura`.
+- [x] P3 Scan preprocessing (deskew, crop, contrast) before OCR for images.
+  - Evidence: commits ac31580, 7c7b052. RED ImportError -> GREEN 5/5 test_scan. Synthetic photo: orientation fixed, residual skew 0°. OCR effect NOT measured (429).
+- [x] P4 Search relevance improvements on `$text` (phrases, ranking); measure on corpus.
+  - Evidence: commit 79d8c8d. RED 2/4 -> GREEN. Title weight 5 + stable tie order; phrases already passed through. Corpus recall/MRR unchanged (neutral).
+- Follow-ups: commit 854ce7b (DELETE during active job: RED orphan checkpoint -> GREEN; PATCH types). ODL once per original PDF: see the ODL commit; BOE 112 s -> 12.9 s.
+  - Checks: pytest 160 passed / 39 skipped (MONGODB_URI=mongodb://127.0.0.1:1, all skips Mongo-unreachable), 199 passed (local Mongo, biblioteca_test); compileall OK.
 
 ### PWA
 - [ ] W1 Auth.js Google login, editor area, server-side API proxy/token minting.

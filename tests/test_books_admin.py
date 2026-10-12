@@ -66,3 +66,26 @@ def test_reprocess_requeues_with_edited_metadata_and_409_when_active(queue, s3) 
     assert jobs.get_job(job_id)["estado"] == "completado"
     assert books_collection().find_one({"libro_id": "libro-cola"})["metadatos"]["titulo"] == "Editado"
     assert client.post("/api/v1/books/no-existe/reprocesar").status_code == 404
+
+
+@needs_mongo
+def test_delete_during_active_job_leaves_nothing_behind(queue, s3, monkeypatch) -> None:
+    from app.db import books_collection, job_pages_collection, pages_collection
+
+    job_id = _txt_job(s3, "Uno.\fDos.".encode(), libro_id="libro-borrado")
+    real = jobs._extract_page
+
+    def extract_then_delete(kind, path, local, numero, libro_id, storage, **kwargs):
+        result = real(kind, path, local, numero, libro_id, storage, **kwargs)
+        if numero == 1:  # the editor deletes the book while page 1 is in flight
+            assert client.delete(f"/api/v1/books/{libro_id}").status_code == 204
+            s3.put(f"{libro_id}/paginas/1.png", b"png", "image/png")  # media written after the delete
+        return result
+
+    monkeypatch.setattr(jobs, "_extract_page", extract_then_delete)
+    assert jobs.run_once("w-del") is True
+    assert jobs.get_job(job_id) is None
+    assert books_collection().find_one({"libro_id": "libro-borrado"}) is None
+    assert pages_collection().count_documents({"libro_id": "libro-borrado"}) == 0
+    assert job_pages_collection().count_documents({}) == 0
+    assert s3.size("libro-borrado/paginas/1.png") is None

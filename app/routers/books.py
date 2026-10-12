@@ -26,7 +26,7 @@ from app.ratelimit import limit_write
 from app.security import require_editor
 from app.services import storage as storage_service
 from app.services.storage import LocalStorage, get_storage, media_url
-from app.services.text import make_diacritic_insensitive_pattern
+from app.services.text import fold_text, make_diacritic_insensitive_pattern
 from app.services.locator import locate_matches
 
 router = APIRouter(tags=["books"])
@@ -213,21 +213,25 @@ def get_page_image(libro_id: str, numero: int) -> Response:
 # Editor management (PATCH / DELETE / reprocesar)
 # --------------------------------------------------------------------------
 class LibroPatch(BaseModel):
-    """Editable `metadatos` fields; unknown fields are rejected."""
+    """Editable `metadatos` fields; unknown fields are rejected.
+
+    Every field is optional (PATCH). `titulo`, `idioma` and `temas` may be
+    omitted but not set to null; `update_book` enforces that with a 422.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    titulo: str = Field(None, min_length=1, max_length=500)
+    titulo: Optional[str] = Field(None, min_length=1, max_length=500)
     subtitulo: Optional[str] = Field(None, max_length=500)
     autor: Optional[str] = Field(None, max_length=300)
     autor_normalizado: Optional[str] = Field(None, max_length=300)
     editorial: Optional[str] = Field(None, max_length=300)
     anio_publicacion: Optional[int] = Field(None, ge=0, le=3000)
-    idioma: str = Field(None, min_length=2, max_length=10)
+    idioma: Optional[str] = Field(None, min_length=2, max_length=10)
     genero: Optional[str] = Field(None, max_length=100)
     tradicion: Optional[str] = Field(None, max_length=100)
     isbn: Optional[str] = Field(None, max_length=20)
-    temas: list[str] = Field(None, max_length=50)
+    temas: Optional[list[str]] = Field(None, max_length=50)
     descripcion: Optional[str] = Field(None, max_length=5000)
 
 
@@ -255,6 +259,8 @@ def update_book(libro_id: str, payload: LibroPatch) -> dict:
         books_collection().update_one({"libro_id": libro_id}, {"$set": {
             **{f"metadatos.{k}": v for k, v in changes.items()}, "actualizado_en": datetime.now(timezone.utc)}})
         page_changes = {k: v for k, v in changes.items() if k in _PAGE_FIELDS}
+        if "titulo" in page_changes:
+            page_changes["titulo_busqueda"] = fold_text(page_changes["titulo"])
         if page_changes:
             pages_collection().update_many({"libro_id": libro_id}, {"$set": page_changes})
     return get_book(libro_id)

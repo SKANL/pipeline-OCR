@@ -88,7 +88,7 @@ Un documento por página: `libro_id`, `ref` (`{libro_id}/pagina/{n}`), `numero`,
 `texto_alternativo`, `estado`, `advertencia`, `orden_fuente`), y campos **desnormalizados** para
 filtrar/facetar: `genero`, `autor_normalizado`, `titulo`, `autor`.
 
-Índices (`ensure_indexes`): `$text` sobre `texto_busqueda` (spanish), único sobre
+Índices (`ensure_indexes`): `$text` sobre `titulo_busqueda` (peso 5) + `texto_busqueda` (peso 1) (spanish; páginas indexadas antes de P4 no tienen `titulo_busqueda` hasta reprocesarlas), único sobre
 `pages.ref` y `books.libro_id`, índice sobre `pages.libro_id`.
 
 ## Módulos

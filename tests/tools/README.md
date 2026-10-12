@@ -13,6 +13,7 @@ resolution. Input mapping: [fixtures](../fixtures/README.md).
 | `fix_confirmed_pdf_evidence`, `probe_confirmed_pdf` | Dated diagnostics against retained historical baselines |
 | `refresh_figure_fixtures`, `refresh_phase2_fixtures` | Update existing loopback DB documents; preserve backups, refuse existing evidence |
 | `verify_phase2_local_api` | In-process HTTP read checks using the current stored media URL |
+| `make_eval_corpus`, `evaluate_corpus` | Synthetic eval corpus (gitignored output) and pipeline evaluation into DB `biblioteca_eval` (loopback, dropped per run); live OCR only for public-domain fixtures, cached and capped. See `docs/EVALUACION_PIPELINE.md` |
 | `check_confirmed_pdf` | Dated isolated harness; pytest DB cleanup and isolated web build; not safe under a no-destructive-DB constraint |
 
 ```powershell

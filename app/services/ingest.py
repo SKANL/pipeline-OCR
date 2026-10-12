@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,7 +31,7 @@ from app.config import get_settings
 from app.db import books_collection, pages_collection
 from app.models import Capitulo, Libro, Metadatos, OcrInfo, Pagina, Procedencia
 from app.services import ocr as ocr_service
-from app.services import pdf_classify, render, structure
+from app.services import pdf_classify, render, scan, structure
 from app.services.extract import (
     FUENTE_IMAGENES,
     FUENTE_PDF_DIGITAL,
@@ -47,6 +48,7 @@ from app.services.ocr import IMAGE_SUFFIXES, OcrNotConfiguredError
 from app.services.storage import Storage, get_storage, safe_filename
 from app.services.text import fold_text
 from app.services.locator import extract_positioned_pdf
+from app.services.cleanup import clean_pages
 
 # Reexportadas para compatibilidad (los tests las importan desde aquí).
 __all__ = [
@@ -183,6 +185,7 @@ def build_page_projection(libro_id: str, pagina: dict, metadatos: dict) -> dict:
         "capitulo_numero": pagina.get("capitulo_numero"),
         "texto": texto,
         "texto_busqueda": fold_text(texto),
+        "titulo_busqueda": fold_text(metadatos.get("titulo") or ""),
         "conteo_palabras": pagina.get("conteo_palabras", 0),
         "conteo_caracteres": pagina.get("conteo_caracteres", 0),
         "ocr_confianza": pagina.get("ocr_confianza"),
@@ -274,8 +277,18 @@ def _assemble_libro(
     confianza_media: float | None,
     origen: list[str],
 ) -> dict:
-    """Construye el documento `Libro` (dict) a partir de páginas extraídas."""
+    """Construye el documento `Libro` (dict) a partir de páginas extraídas.
+
+    Con `text_cleanup` (por defecto) limpia el libro completo antes: quita
+    cabeceras/pies/números de página repetidos y guiones de fin de línea,
+    remapeando posiciones de glifos (ver `services/cleanup.py`).
+    """
     now = datetime.now(timezone.utc)
+    if get_settings().text_cleanup:
+        clean_pages(pages)
+        for page in pages:
+            page["conteo_palabras"] = count_words(page.get("texto", ""))
+            page["conteo_caracteres"] = count_chars(page.get("texto", ""))
     if fuente in (FUENTE_PDF_ESCANEADO, FUENTE_IMAGENES):
         ocr_info = OcrInfo(
             motor=motor or "mistral",
@@ -526,6 +539,7 @@ def _pdf_verification(
     storage: Storage,
     native_by_path: dict | None = None,
     first_page: int = 1,
+    structures: dict | None = None,
 ) -> tuple[
     list[str | None],
     dict[int, list[dict]],
@@ -546,7 +560,7 @@ def _pdf_verification(
     figuras_por_pagina: dict[int, list[dict]] = {}
     offset = first_page - 1
     for pdf_path in pdf_paths:
-        arch = structure.extract_structure(pdf_path)
+        arch = structures[pdf_path] if structures and pdf_path in structures else structure.extract_structure(pdf_path)
         try:
             count = render.pdf_page_count(pdf_path)
         except Exception as exc:  # noqa: BLE001 - no debe tumbar la ingesta
@@ -639,6 +653,7 @@ def _extract_pdf_source(
     capitulos: list[dict],
     storage: Storage,
     first_page: int = 1,
+    structures: dict | None = None,
 ) -> dict:
     """Extrae páginas de uno o más PDF (texto, bloques, imagen y procedencia).
 
@@ -646,6 +661,7 @@ def _extract_pdf_source(
     OpenDataLoader conserva ayudas visuales y cajas aproximadas de respaldo.
     Sin texto nativo se usan los bloques o pdf-inspector, con motor real.
     `first_page` numera las imágenes/recortes guardados (cola: una página por vez).
+    `structures` (ruta -> salida de opendataloader) evita relanzar la JVM.
     """
     native_by_path = {}
     for pdf_path in pdf_paths:
@@ -655,7 +671,7 @@ def _extract_pdf_source(
             logger.warning("Extracción nativa no disponible para %s: %s", pdf_path.name, exc)
             native_by_path[pdf_path] = []
     image_urls, bloques_por_pagina, image_sizes, figuras_por_pagina = _pdf_verification(
-        pdf_paths, libro_id, storage, native_by_path, first_page
+        pdf_paths, libro_id, storage, native_by_path, first_page, structures
     )
 
     pages: list[dict] = []
@@ -737,16 +753,30 @@ def _extract_image_source(
     storage: Storage,
     first_page: int = 1,
 ) -> dict:
-    """Guarda la imagen de cada página y rutea el conjunto a OCR."""
+    """Guarda la imagen de cada página y rutea el conjunto a OCR.
+
+    Con `scan_preprocess` (por defecto) cada imagen se endereza y limpia
+    (`services/scan.py`); esa versión es la que va al OCR y la que se guarda
+    como imagen de página. El original queda intacto en el almacenamiento.
+    """
     urls: list[str | None] = []
     sizes: list[tuple[int, int] | None] = []
-    for index, source in enumerate(sources, start=first_page):
-        png = _page_png_bytes(source.data, source.suffix)
-        relative = storage.save_page_image(libro_id, index, png)
-        urls.append(relative)
-        sizes.append(_png_size(png))
+    preprocess = get_settings().scan_preprocess
+    with tempfile.TemporaryDirectory() as tmp:
+        ocr_paths: list[Path] = []
+        for index, source in enumerate(sources, start=first_page):
+            if preprocess:
+                png = scan.preprocess_image(source.data)
+                path = Path(tmp) / f"{index}-{source.path.stem}.png"  # keeps order + name
+                path.write_bytes(png)
+            else:
+                png, path = _page_png_bytes(source.data, source.suffix), source.path
+            ocr_paths.append(path)
+            relative = storage.save_page_image(libro_id, index, png)
+            urls.append(relative)
+            sizes.append(_png_size(png))
 
-    result = extract_from_images([source.path for source in sources])
+        result = extract_from_images(ocr_paths)
     pages = _pages_from_extraction(_pages_from_result(result, urls), capitulos)
     for page, size in zip(pages, sizes):
         if size:

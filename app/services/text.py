@@ -16,13 +16,19 @@ import re
 import unicodedata
 
 
+# Typographic quotes fold to ASCII; the soft hyphen disappears.
+QUOTES = str.maketrans({"‘": "'", "’": "'", "‚": "'", "‛": "'", "“": '"', "”": '"', "„": '"',
+                        "‟": '"', "«": '"', "»": '"', "­": None})
+
+
 def fold_text(value: str) -> str:
     """Devuelve `value` en minúsculas y sin diacríticos.
 
     Descompone con NFKD y elimina signos combinatorios: "Justificación" pasa
     a "justificacion" y las ligaduras tipográficas se expanden al indexar.
+    Las comillas tipográficas pasan a ASCII y el guion blando se elimina.
     """
-    decomposed = unicodedata.normalize("NFKD", value)
+    decomposed = unicodedata.normalize("NFKD", value.translate(QUOTES))
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).lower()
 
 

@@ -226,11 +226,11 @@ def test_pdf_job_resumes_from_checkpoint_without_redoing_pages(queue, s3, monkey
     real = ingest._extract_pdf_source
     calls: list[int] = []
 
-    def flaky(paths, libro_id, capitulos, storage, first_page=1):
+    def flaky(paths, libro_id, capitulos, storage, first_page=1, **kwargs):
         calls.append(first_page)
         if first_page == 2 and calls.count(2) == 1:
             raise RuntimeError("render crashed")
-        return real(paths, libro_id, capitulos, storage, first_page=first_page)
+        return real(paths, libro_id, capitulos, storage, first_page=first_page, **kwargs)
 
     monkeypatch.setattr(ingest, "_extract_pdf_source", flaky)
     jobs.run_once("w1")
@@ -244,6 +244,32 @@ def test_pdf_job_resumes_from_checkpoint_without_redoing_pages(queue, s3, monkey
     assert [p["numero"] for p in pages] == [1, 2, 3]
     assert [p["imagen_url"] for p in pages] == [f"libro-pdf/paginas/{n}.png" for n in (1, 2, 3)]
     assert "Pagina 3" in pages[2]["texto"]
+
+
+@needs_mongo
+def test_pdf_job_runs_opendataloader_once_per_original(queue, s3, monkeypatch) -> None:
+    from app.db import pages_collection
+    from app.services import structure
+
+    data = _pdf_bytes(3)
+    key = "libro-odl/000-libro.pdf"
+    s3.put(key, data, "application/pdf")
+    jobs.create_job(libro_id="libro-odl", metadatos={}, estado="pendiente", archivos=[
+        {"nombre": "libro.pdf", "tipo_contenido": "application/pdf", "tamano": len(data),
+         "sha256": _sha(data), "clave": key}])
+    real, calls = structure.extract_structure, []
+
+    def counted(path, **kwargs):
+        calls.append(path)
+        return {"bloques": {n: [{"bbox": [72.0, 740.0, 400.0, 765.0], "texto": f"Pagina {n}"}] for n in (1, 2, 3)},
+                "figuras": {}}
+
+    monkeypatch.setattr(structure, "extract_structure", counted)
+    jobs.run_once("w-odl")
+    assert len(calls) == 1
+    pages = list(pages_collection().find({"libro_id": "libro-odl"}).sort("numero", 1))
+    assert [p["bloques"][0]["texto"] for p in pages] == ["Pagina 1", "Pagina 2", "Pagina 3"]
+    assert all(p["bloques"][0]["bbox_norm"] for p in pages)
 
 
 def test_worker_stops_cleanly(monkeypatch) -> None:
