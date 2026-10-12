@@ -191,3 +191,15 @@ def test_process_runs_under_the_job_provider(monkeypatch) -> None:
     monkeypatch.setattr(get_settings(), "ocr_provider", "tesseract")
     jobs.process({})
     assert seen == ["glm", "tesseract"]
+
+
+def test_ocr_blocks_without_pdf_points_survive_assembly() -> None:
+    from app.services import ingest
+
+    page = {"numero": 1, "texto": "Hola", "motor": "tesseract",
+            "bloques": [{"texto": "Hola", "tipo": "linea", "bbox": None, "bbox_norm": [0.1, 0.1, 0.2, 0.05]}]}
+    libro = ingest._assemble_libro(
+        libro_id="ocr-bloques", metadatos=ingest._metadatos_from({"titulo": "x"}), capitulos=[],
+        pages=ingest._pages_from_extraction([page], []), fuente="imagenes", motor="tesseract",
+        modelo="spa+lat", confianza_media=None, origen=["a.png"])
+    assert libro["paginas"][0]["bloques"][0]["bbox_norm"] == [0.1, 0.1, 0.2, 0.05]
