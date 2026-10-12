@@ -146,17 +146,26 @@ class S3Storage(Storage):
 
     def __init__(self, *, endpoint_url: str | None, access_key_id: str,
                  secret_access_key: str, bucket: str, region: str = "auto",
-                 public_base_url: str = "") -> None:
+                 public_base_url: str = "", presign_endpoint_url: str | None = None) -> None:
         self.bucket = bucket
         self.public_base_url = public_base_url
-        self.client = boto3.client(
-            "s3",
-            endpoint_url=endpoint_url,
-            aws_access_key_id=access_key_id,
-            aws_secret_access_key=secret_access_key,
-            region_name=region,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
-        )
+
+        def client(url: str | None):
+            return boto3.client(
+                "s3",
+                endpoint_url=url,
+                aws_access_key_id=access_key_id,
+                aws_secret_access_key=secret_access_key,
+                region_name=region,
+                config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            )
+
+        self.client = client(endpoint_url)
+        # The signature covers the host, so browser-facing URLs are signed for the
+        # endpoint the browser reaches (Docker: localhost:9000 vs s3:9000 inside).
+        self.presign_client = (client(presign_endpoint_url)
+                               if presign_endpoint_url and presign_endpoint_url != endpoint_url
+                               else self.client)
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
         self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
@@ -181,7 +190,7 @@ class S3Storage(Storage):
     def url(self, key: str) -> str:
         if self.public_base_url:
             return f"{self.public_base_url.rstrip('/')}/{key}"
-        return self.client.generate_presigned_url(
+        return self.presign_client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=_GET_EXPIRY
         )
 
@@ -194,7 +203,7 @@ class S3Storage(Storage):
             raise
 
     def presign_put(self, key: str, content_type: str, expires: int = 900) -> str:
-        return self.client.generate_presigned_url(
+        return self.presign_client.generate_presigned_url(
             "put_object",
             Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
             ExpiresIn=expires,
@@ -220,6 +229,7 @@ def get_storage() -> Storage:
             bucket=settings.s3_bucket,
             region=settings.s3_region,
             public_base_url=settings.s3_public_base_url,
+            presign_endpoint_url=settings.s3_presign_endpoint_url or None,
         )
     return LocalStorage(settings.media_root)
 
