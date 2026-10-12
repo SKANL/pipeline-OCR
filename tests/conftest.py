@@ -17,6 +17,9 @@ os.environ.setdefault(
     "MEDIA_ROOT", str(Path(tempfile.gettempdir()) / "pipeline_ocr_test_media")
 )
 
+# Tests use the local backend unless a test builds its own S3Storage.
+os.environ["S3_ENDPOINT_URL"] = ""
+
 import pytest  # noqa: E402
 from pymongo import MongoClient  # noqa: E402
 

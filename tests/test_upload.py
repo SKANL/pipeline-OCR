@@ -77,13 +77,13 @@ def test_upload_text_pdf_indexes_and_searches() -> None:
     assert all(p["motor"] == "pypdfium2" for p in pages)
     assert all(p["posiciones"] for p in pages)
     assert all(p["imagen_url"] for p in pages)
-    assert all(p["imagen_url"] == f"/media/subida-digital/paginas/{p['numero']}.png" for p in pages)
+    assert all(p["imagen_url"] == f"subida-digital/paginas/{p['numero']}.png" for p in pages)  # keys
 
     search = client.get("/api/v1/search", params={"q": "gracia"}).json()
     assert search["total"] >= 1
     hits = [h for h in search["resultados"] if h["libro_id"] == "subida-digital"]
     assert hits
-    assert all(h["imagen_url"] for h in hits)
+    assert all(h["imagen_url"].startswith("/media/subida-digital/") for h in hits)
     if any(p.get("bloques") for p in pages):
         assert any(h["bbox"] for h in hits)
 

@@ -7,8 +7,11 @@ primer match, resaltado con `<mark>`).
 
 from __future__ import annotations
 
+from html import escape
+
 from app.db import pages_collection
 from app.models import SearchHit
+from app.services.storage import media_url
 from app.services.text import fold_text, make_diacritic_insensitive_pattern
 from app.services.locator import locate_matches, match_ranges, query_units
 
@@ -21,7 +24,7 @@ def _query_terms(query: str) -> list[str]:
 
 
 def make_snippet(texto: str, query: str, window: int = SNIPPET_WINDOW) -> str:
-    """Snippet con TODAS las apariciones de los términos envueltas en `<mark>`.
+    """Snippet HTML: texto escapado y TODAS las apariciones envueltas en `<mark>`.
 
     El match es insensible a mayúsculas y a diacríticos: buscar
     "justificacion" resalta "justificación".
@@ -29,7 +32,7 @@ def make_snippet(texto: str, query: str, window: int = SNIPPET_WINDOW) -> str:
     texto = texto or ""
     ranges, _ = match_ranges(texto, query)
     if not ranges:
-        return texto[:window]
+        return escape(texto[:window])
     first = ranges[0][0]
     start = max(0, first - window // 2)
     end = min(len(texto), start + window)
@@ -39,9 +42,9 @@ def make_snippet(texto: str, query: str, window: int = SNIPPET_WINDOW) -> str:
         left, right = max(left, start), min(right, end)
         if left >= right:
             continue
-        parts.extend([texto[cursor:left], "<mark>", texto[left:right], "</mark>"])
+        parts.extend([escape(texto[cursor:left]), "<mark>", escape(texto[left:right]), "</mark>"])
         cursor = right
-    parts.append(texto[cursor:end])
+    parts.append(escape(texto[cursor:end]))
 
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(texto) else ""
@@ -100,7 +103,7 @@ def _hit_from_doc(doc: dict, query: str, score: float | None) -> SearchHit:
         capitulo_numero=doc.get("capitulo_numero"),
         snippet=make_snippet(doc.get("texto", ""), query),
         score=score,
-        imagen_url=doc.get("imagen_url"),
+        imagen_url=media_url(doc.get("imagen_url")),
         bbox=bbox,
         bloque_idx=bloque_idx,
         bbox_norm=bbox_norm,

@@ -34,7 +34,7 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
 
 - **`/search`** → `{ total, resultados: [ { libro_id, titulo, autor, ref, numero,
   capitulo_numero, snippet, score, imagen_url, bbox, bloque_idx, bbox_norm } ] }`.
-  `snippet` contiene `<mark>` alrededor de los términos; `bloque_idx`/`bbox_norm`
+  `snippet` es HTML seguro: texto escapado (`html.escape`) y `<mark>` alrededor de los términos; `bloque_idx`/`bbox_norm`
   conservan la localización aproximada anterior. `coincidencias` añade hasta
   8 coincidencias por resultado; el lector recalcula la lista con `/ref?q=`.
 - **`/ingest`** → `{ books, pages, books_processed, errors, fuentes }` donde
@@ -84,6 +84,9 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
 
 - `bloques`: `bbox`, `texto`, `bbox_norm`, `tipo` (tipo semántico del conversor),
   `orden` (orden de lectura del árbol, incluidos los pies en listas).
+- `imagen_url` (página y figuras) es una URL lista para usar: `/media/...` con
+  almacenamiento local, o del bucket S3 (pública o firmada con expiración de 1 h).
+  No persistirla: pedirla de nuevo a la API.
 - `figuras`: `bbox`, `bbox_norm`, `imagen_url`, `imagen_ancho`, `imagen_alto`,
   `tipo`, `orden`, `orden_fuente`, `pie`, `texto_alternativo`, `estado`, `advertencia`.
   Los campos nuevos tienen valores por defecto para documentos anteriores.

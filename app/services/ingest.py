@@ -43,7 +43,7 @@ from app.services.extract import (
 )
 from app.services.naming import natural_key, slugify
 from app.services.ocr import IMAGE_SUFFIXES, OcrNotConfiguredError
-from app.services.storage import Storage, get_storage
+from app.services.storage import Storage, get_storage, safe_filename
 from app.services.text import fold_text
 from app.services.locator import extract_positioned_pdf
 
@@ -505,7 +505,7 @@ def _crop_figures(
             if not size:
                 raise ValueError("Crop has no valid image dimensions")
             relative = storage.save_figure(libro_id, numero, index, data)
-            record.update(imagen_url=storage.url(relative), imagen_ancho=size[0], imagen_alto=size[1],
+            record.update(imagen_url=relative, imagen_ancho=size[0], imagen_alto=size[1],
                           bbox_norm=structure.normalize_bbox(bbox, width_pt, height_pt))
         except Exception as exc:  # noqa: BLE001 - la figura no debe tumbar la ingesta
             logger.warning(
@@ -557,7 +557,7 @@ def _pdf_verification(
             try:
                 data = render.render_pdf_page(pdf_path, page_index, dpi=dpi)
                 relative = storage.save_page_image(libro_id, numero, data)
-                image_urls.append(storage.url(relative))
+                image_urls.append(relative)
                 image_sizes.append(_png_size(data))
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -737,7 +737,7 @@ def _extract_image_source(
     for index, source in enumerate(sources, start=1):
         png = _page_png_bytes(source.data, source.suffix)
         relative = storage.save_page_image(libro_id, index, png)
-        urls.append(storage.url(relative))
+        urls.append(relative)
         sizes.append(_png_size(png))
 
     result = extract_from_images([source.path for source in sources])
@@ -933,16 +933,13 @@ def _persist(libro: dict, storage: Storage) -> None:
     numeros = [pagina["numero"] for pagina in libro["paginas"]]
     pages = pages_collection()
 
-    # Poda de páginas obsoletas: si el libro encogió o renumeró, borra las
-    # páginas (docs) Y sus imágenes en disco (evita huérfanas de ambos lados).
-    stale = [
-        d["numero"]
-        for d in pages.find(
-            {"libro_id": libro_id, "numero": {"$nin": numeros}}, {"numero": 1}
-        )
-    ]
-    for numero in stale:
-        storage.delete(f"{libro_id}/paginas/{numero}.png")
+    # Poda de media: borra todo objeto bajo `{libro_id}/` que el libro nuevo
+    # no referencia (páginas, recortes y originales obsoletos).
+    keep = {f"{libro_id}/{safe_filename(nombre)}" for nombre in libro.get("origen") or []}
+    for pagina in libro["paginas"]:
+        keep.add(pagina.get("imagen_url"))
+        keep.update(f.get("imagen_url") for f in pagina.get("figuras") or [])
+    storage.delete_prefix(f"{libro_id}/", keep={k for k in keep if k})
 
     metadatos = libro.get("metadatos", {})
     for pagina in libro["paginas"]:

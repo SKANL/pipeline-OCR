@@ -109,3 +109,19 @@ def test_hit_bbox_none_when_term_not_in_blocks() -> None:
     assert hit.bbox is None
     assert hit.bloque_idx is None
     assert hit.bbox_norm is None
+
+
+def test_hit_builds_url_from_stored_key() -> None:
+    hit = _hit_from_doc({"ref": "libro-x/pagina/1", "imagen_url": "libro-x/paginas/1.png"}, "x", None)
+    assert hit.imagen_url == "/media/libro-x/paginas/1.png"
+
+
+def test_snippet_escapes_book_text_but_keeps_mark() -> None:
+    snippet = make_snippet("<script>alert(1)</script> la gracia & paz", "gracia")
+    assert "<script>" not in snippet
+    assert "&lt;script&gt;" in snippet and "&amp; paz" in snippet
+    assert "<mark>gracia</mark>" in snippet
+
+
+def test_snippet_escapes_no_match_path() -> None:
+    assert make_snippet("<img src=x onerror=alert(1)>", "nada") == "&lt;img src=x onerror=alert(1)&gt;"

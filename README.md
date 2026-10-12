@@ -52,7 +52,12 @@ Variables de entorno:
 | `MONGODB_DB` | Nombre de la base de datos | `biblioteca` |
 | `MISTRAL_API_KEY` | API key de Mistral (OCR; requerida para PDF escaneado/imágenes) | _(vacío)_ |
 | `MISTRAL_OCR_MODEL` | Modelo de OCR | `mistral-ocr-latest` |
-| `MEDIA_ROOT` | Directorio raíz de originales almacenados | `./_media` |
+| `MEDIA_ROOT` | Directorio raíz de originales almacenados (backend local) | `./_media` |
+| `S3_ENDPOINT_URL` | Endpoint S3-compatible (R2 / SeaweedFS `http://localhost:9000`); con `S3_BUCKET` activa el backend S3 | vacío |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Credenciales S3 (en local cualquiera sirve) | vacío |
+| `S3_BUCKET` | Bucket de media | vacío |
+| `S3_PUBLIC_BASE_URL` | Base pública del bucket; vacío => URLs GET firmadas (1 h) | vacío |
+| `S3_REGION` | Región S3 | `auto` |
 | `MAX_UPLOAD_BYTES` | Límite de tamaño por subida (bytes) | `104857600` |
 | `PAGE_IMAGE_DPI` | Resolución del render PDF -> PNG | `150` |
 | `API_KEY` | Si no está vacía, `POST /ingest*` exige el header `X-API-Key` | _(vacío)_ |
@@ -122,7 +127,7 @@ uv run pytest
 | `GET` | `/ref/{libro_id}/pagina/{numero}` | Página con texto, bloques, figuras, imagen y navegación. `q` opcional recalcula coincidencias. |
 | `GET` | `/pages/{libro_id}/pagina/{numero}/imagen` | Imagen PNG de la página (404 si no hay). |
 | `GET` | `/cite/{libro_id}/pagina/{numero}?estilo=apa` | Cita formateada (`apa`, `chicago`, `mla`). |
-| `GET` | `/media/...` | Archivos estáticos de `MEDIA_ROOT` (imágenes de página y recortes). |
+| `GET` | `/media/...` | Archivos estáticos de `MEDIA_ROOT` (solo backend local; con S3 las URLs apuntan al bucket). |
 | `GET` | `/health` | `{ "status": "ok" }`. |
 
 ## Estructura
@@ -144,7 +149,7 @@ app/
     pdf_layout.py    # layout nativo: orden de lectura y ayudas visuales
     render.py        # render de páginas a PNG (pypdfium2)
     ocr.py           # cliente Mistral OCR (imagen / lista / PDF)
-    storage.py       # almacenamiento de originales (local, swappable)
+    storage.py       # almacenamiento por clave: local (MEDIA_ROOT) o S3 (R2/SeaweedFS)
     text.py          # fold y limpieza de texto (búsqueda sin acentos)
     naming.py        # slug y orden natural
     search.py        # búsqueda $text + snippets
