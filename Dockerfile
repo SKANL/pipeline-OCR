@@ -1,7 +1,8 @@
 FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:0.7.10 /uv /usr/local/bin/uv
-# Java is required by opendataloader-pdf
+# Java: opendataloader-pdf. Tesseract (spa+lat): default OCR provider.
 RUN apt-get update && apt-get install -y --no-install-recommends default-jre-headless \
+       tesseract-ocr tesseract-ocr-spa tesseract-ocr-lat \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m app
 WORKDIR /app

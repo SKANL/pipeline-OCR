@@ -7,11 +7,11 @@ Runs the REAL per-page job path (`jobs._extract_page` -> ingest builders ->
 Metrics: CER/WER vs ground truth (folded, punctuation-free), header/footer
 leakage, hyphenation splits, search recall@10 and MRR.
 
-Live Mistral OCR: only for files under `tests/fixtures/real-pdfs/public-domain/`,
-cached by page/bytes and capped per file (see BUDGET). Synthetic files never
-reach OCR.
+Remote OCR (mistral, glm): only for files under `tests/fixtures/real-pdfs/public-domain/`,
+cached by provider/page/bytes and capped per file (see BUDGET). Local Tesseract
+is neither cached nor budgeted. Synthetic files never reach OCR.
 
-Uso: uv run python -m tests.tools.evaluate_corpus --etiqueta base|despues
+Uso: uv run python -m tests.tools.evaluate_corpus --etiqueta base|despues [--ocr-proveedor tesseract]
 """
 
 from __future__ import annotations
@@ -93,6 +93,10 @@ _real_pdf_file, _real_image_bytes = ocr.ocr_pdf_file, ocr.ocr_image_bytes
 
 
 def _cached(key: str, call):
+    if ocr.provider_name() == "tesseract":  # local: no quota, no cache
+        return call()
+    if ocr.provider_name() != "mistral":  # keep the historical mistral cache keys
+        key = f"{ocr.provider_name()}-{key}"
     CACHE.mkdir(parents=True, exist_ok=True)
     target = CACHE / f"{key}.json"
     if target.exists():
@@ -294,7 +298,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--etiqueta", required=True)
     parser.add_argument("--solo", help="slug filter (comma separated)")
+    parser.add_argument("--ocr-proveedor", help="OCR provider (default: OCR_PROVIDER)")
     args = parser.parse_args()
+    with ocr.use_provider(args.ocr_proveedor):
+        return _main(args)
+
+
+def _main(args) -> int:
 
     settings = get_settings()
     host = settings.mongodb_uri.split("@")[-1].split("//")[-1].split(":")[0].split("/")[0]
@@ -364,7 +374,7 @@ def main() -> int:
 
     out = DOCS / "evaluacion" / f"{args.etiqueta}.json"
     out.parent.mkdir(exist_ok=True)
-    out.write_text(json.dumps({"filas": rows, "ocr_llamadas_en_vivo": LIVE_CALLS}, ensure_ascii=False, indent=1), encoding="utf-8")
+    out.write_text(json.dumps({"filas": rows, "ocr_proveedor": ocr.provider_name(), "ocr_llamadas_en_vivo": LIVE_CALLS}, ensure_ascii=False, indent=1), encoding="utf-8")
     print("OCR live calls this run:", LIVE_CALLS)
     print("wrote", out.relative_to(ROOT))
     return 0
