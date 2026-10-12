@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     """Ajustes tipados leídos del entorno o del archivo `.env`."""
 
     model_config = SettingsConfigDict(
+        env_ignore_empty=True,  # "KEY=" in .env means "use the default", not an empty value
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
