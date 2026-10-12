@@ -5,7 +5,8 @@ eclesiásticos escaneados en algo **buscable, legible y citable**. El loop del
 producto es **BUSCAR → LEER → CITAR**.
 
 Documentación: `docs/PRODUCT_BRIEF.md`, `docs/ARCHITECTURE.md`, `docs/API.md` y
-`docs/RUNNING.md` (cómo ejecutar la API y la PWA).
+`docs/RUNNING.md` (cómo ejecutar la API y la PWA) y `docs/DESPLIEGUE.md`
+(producción: Atlas, R2, Render, Vercel, Google OAuth, Mistral).
 
 - **FastAPI** para la API.
 - **MongoDB** (`pymongo`) como store: colección `books` (documento de archivo)
@@ -29,7 +30,7 @@ El modelo de datos conserva los nombres de campo en español de
 
 - Python >= 3.13
 - [`uv`](https://docs.astral.sh/uv/) (probado con 0.7.10)
-- MongoDB local (opcional para los tests; requerido para ingesta/búsqueda real)
+- MongoDB local (opcional para los tests; requerido para ingesta/búsqueda real) y Docker para `docker compose up -d` (Mongo + S3 local)
 - API key de Mistral (opcional, solo si se usa OCR)
 
 ## Instalación
@@ -61,6 +62,8 @@ Variables de entorno:
 | `MAX_UPLOAD_BYTES` | Límite de tamaño por subida (bytes) | `104857600` |
 | `MAX_FILE_BYTES` | Límite por archivo en subidas firmadas (bytes) | `52428800` |
 | `WORKER_ENABLED` | Worker de la cola de ingesta dentro del proceso de la API | `true` |
+| `TEXT_CLEANUP` | Quita cabeceras/pies repetidos y guiones de fin de línea al armar el libro | `true` |
+| `SCAN_PREPROCESS` | Imágenes: EXIF, grises, contraste, enderezado y recorte antes del OCR | `true` |
 | `PAGE_IMAGE_DPI` | Resolución del render PDF -> PNG | `150` |
 | `API_KEY` | Clave de operación (scripts): header `X-API-Key` en escrituras | _(vacío)_ |
 | `AUTH_SECRET` | Secreto HS256 compartido con la PWA para el token `Authorization: Bearer` de editores. Sin `API_KEY` ni `AUTH_SECRET`, las escrituras quedan **abiertas** (modo dev, con aviso al arrancar) | _(vacío)_ |
@@ -138,6 +141,10 @@ uv run pytest
 | `GET` | `/pages/{libro_id}/pagina/{numero}/imagen` | Imagen PNG de la página (404 si no hay). |
 | `GET` | `/cite/{libro_id}/pagina/{numero}?estilo=apa` | Cita formateada (`apa`, `chicago`, `mla`). |
 | `GET` | `/media/...` | Archivos estáticos de `MEDIA_ROOT` (solo backend local; con S3 las URLs apuntan al bucket). |
+| `GET` | `/yo` | `{ email, rol }` del token Bearer. |
+| `GET`/`POST`/`DELETE` | `/editores` | Admin: lista, alta/cambio y baja de editores. |
+| `PATCH`/`DELETE` | `/books/{libro_id}` | Editor: edita metadatos / borra el libro. |
+| `POST` | `/books/{libro_id}/reprocesar` | Editor: reencola desde los originales guardados. |
 | `GET` | `/health` | `{ "status": "ok" }`. |
 
 ## Estructura
@@ -148,8 +155,9 @@ app/
   config.py          # Settings (pydantic-settings)
   db.py              # cliente Mongo, colecciones, ensure_indexes()
   models.py          # modelos Pydantic (nombres ES de modelo_libro.json)
-  security.py        # API key para endpoints de escritura
-  routers/           # ingest, upload, search, books, citations
+  security.py        # token Bearer de editores / API key para escrituras
+  ratelimit.py       # rate limit en memoria por cliente
+  routers/           # ingest, upload, jobs, search, books, citations, editors
   services/
     ingest.py        # pipeline de ingesta (armado puro + persistencia)
     extract.py       # router de extracción: PDF digital/escaneado o imágenes
@@ -160,6 +168,8 @@ app/
     render.py        # render de páginas a PNG (pypdfium2)
     ocr.py           # cliente Mistral OCR (imagen / lista / PDF)
     storage.py       # almacenamiento por clave: local (MEDIA_ROOT) o S3 (R2/SeaweedFS)
+    jobs.py          # cola Mongo de ingesta + worker en proceso
+    scan.py          # preprocesado de fotos antes del OCR
     text.py          # fold y limpieza de texto (búsqueda sin acentos)
     naming.py        # slug y orden natural
     search.py        # búsqueda $text + snippets

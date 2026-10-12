@@ -2,20 +2,59 @@
 
 Documento técnico del backend/API y su relación con la PWA. Para el encuadre de
 producto ver `PRODUCT_BRIEF.md`; para endpoints, `API.md`; para ejecutar,
-`RUNNING.md`.
+`RUNNING.md`; para llevarlo a producción, `DESPLIEGUE.md`.
 
 ## Vista general
 
 ```
-PWA (Next.js)  ──HTTP/JSON──►  API FastAPI  ──►  MongoDB (books / pages)
-   repo hermano                 pipeline              + archivos en MEDIA_ROOT
-   biblioteca-eclesiastica-web  de ingesta/OCR
+ NAVEGADOR                         VERCEL (Next.js, PWA)                    RENDER free (Docker)
+ +-----------+   lectura SSR      +-------------------------+  HTTP/JSON  +---------------------------+
+ | lector /  |<------------------>| Server Components       |------------>| FastAPI  /api/v1          |
+ | editor    |                    | Server Actions          |  Bearer JWT | - lectura publica         |
+ | (SW cache)|   login Google     | Auth.js v5 (sesion JWT) |  HS256 5min | - escrituras: editor/admin|
+ +-----+-----+<------------------>| firma token por llamada |             | - rate limit en memoria   |
+       |                          +-------------------------+             |                           |
+       |                                                                  |  hilo WORKER (lifespan)   |
+       | (3) PUT directo, URL firmada 15 min (CORS del bucket)            |  drena la cola `trabajos` |
+       |                                                                  |  pipeline: clasificar ->  |
+       |    +---------------------------------------------+               |  extraer/OCR -> normalizar|
+       +--->| Cloudflare R2 (SeaweedFS en local), S3 API  |<--------------|  -> persistir             |
+            | originales, paginas/{n}.png, figuras/       |  boto3 HEAD/  +-----+---------------+-----+
+            +---------------------------------------------+  GET/PUT/DEL        |               |
+                  ^  imagenes: URL publica o GET firmado 1 h                    |               | OCR (solo
+                  |  (en la respuesta de /ref y /search)                        v               | escaneados)
+                  |                                           +-------------------------+       v
+                  +-------------------------------------------| MongoDB Atlas (local:   |  +-------------+
+                                                              | docker mongo:8)         |  | Mistral OCR |
+                                                              | books, pages, trabajos, |  +-------------+
+                                                              | trabajo_paginas,editores|
+                                                              +-------------------------+
 ```
 
-- **API** (`app/`): expone `/api/v1`, corre el pipeline de ingesta y la búsqueda.
-- **MongoDB**: store. `books` (documento de archivo del libro) y `pages`
-  (proyección indexable, unidad de retrieval).
-- **PWA** (repo hermano): consume la API. No comparte código con el backend.
+Subida firmada (editor), numeración = pasos de la figura:
+
+```
+ (1) PWA calcula sha256 -> Server Action -> POST /uploads  --> API crea `trabajos` (esperando_subida)
+                                                              y devuelve URL PUT firmada por archivo
+ (2) idempotencia: mismo sha256 => 200 {existente:true}, sin URLs ni duplicados
+ (3) navegador --PUT--> R2 (reintentos con backoff; la API nunca retiene los bytes)
+ (4) Server Action -> POST /uploads/{id}/completar --> API HEAD de cada objeto (tamano) -> `pendiente`
+ (5) worker: claim atomico + lease 5 min -> por pagina: extraer/OCR -> checkpoint -> heartbeat
+     -> arma libro -> persiste books/pages + media -> `completado` (o reintento con backoff / `fallido`)
+ (6) PWA consulta GET /trabajos/{id} con backoff (1 s -> 10 s) hasta `completado`
+```
+
+- **API** (`app/`): expone `/api/v1`, corre la cola/worker, el pipeline de ingesta
+  y la búsqueda.
+- **MongoDB**: `books` (documento de archivo), `pages` (proyección indexable, unidad
+  de retrieval), `trabajos` (cola), `trabajo_paginas` (checkpoints) y `editores`.
+- **R2/S3**: originales y PNG de pagina/figuras; Mongo guarda **claves**; la URL se
+  arma al responder. Sin `S3_ENDPOINT_URL` + `S3_BUCKET` se usa `MEDIA_ROOT` local
+  (sin subidas firmadas: `/uploads` responde 501).
+- **PWA** (repo hermano `biblioteca-eclesiastica-web`): lee la API desde el
+  servidor (Server Components); solo "Copiar cita" llama a la API desde el
+  navegador. Service worker propio (`public/sw.js`) para el shell offline y páginas
+  leidas recientemente. No comparte código con el backend.
 
 ## Pipeline de ingesta (input → output)
 
