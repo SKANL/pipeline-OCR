@@ -2,7 +2,7 @@
 
 Guía paso a paso del stack decidido: **PWA en Vercel Hobby**, **API + cola + worker
 en Render (free, Docker)**, **MongoDB Atlas (free)**, **Cloudflare R2** y
-**Mistral OCR**. Las variables de la API están definidas en `app/config.py`; las de
+**OCR intercambiable** (Tesseract en el contenedor por defecto; Mistral o GLM-OCR opcionales). Las variables de la API están definidas en `app/config.py`; las de
 la PWA en `auth.ts`, `lib/api.ts` y `lib/server/api.ts` del repo
 `biblioteca-eclesiastica-web`.
 
@@ -112,7 +112,11 @@ Ojo con el nombre: `AUTH_SECRET` en Render ≠ `AUTH_SECRET` en Vercel.
    | `AUTH_SECRET` | secreto del token API (paso 3) | sí |
    | `ADMIN_EMAILS` | tu email de Google (coma para varios) | no |
    | `CORS_ORIGINS` | `https://<tu-app>.vercel.app` (más `http://localhost:3010` si hace falta) | no |
-   | `MISTRAL_API_KEY` | clave de Mistral (paso 8); sin ella el OCR no funciona | sí |
+   | `OCR_PROVIDER` | `tesseract` (ya en `render.yaml`); `mistral` o `glm` si se configura su clave (paso 8) | no |
+   | `OCR_LANGS` | `spa+lat` (ya en `render.yaml`) | no |
+   | `OPENDATALOADER_ENABLED` | `false` (ya en `render.yaml`): sin JVM en 512 MB; texto y posiciones salen de PDFium | no |
+   | `GLM_API_KEY` | clave de Z.ai, solo si se usa `glm` | sí |
+   | `MISTRAL_API_KEY` | clave de Mistral, solo si se usa `mistral` (paso 8) | sí |
    | `MISTRAL_OCR_MODEL` | `mistral-ocr-latest` (ya en `render.yaml`) | no |
    | `TRUST_PROXY_HEADERS` | `true` (ya en `render.yaml`): Render proxea y la IP real viene en `X-Forwarded-For`; sin esto el rate limit ve una sola IP | no |
    | `INGEST_ALLOWED_ROOTS` | vacío (ya en `render.yaml`): `POST /ingest` queda deshabilitado; se usan las subidas firmadas | no |
@@ -198,7 +202,24 @@ Con el dominio de Vercel ya conocido:
   servidor a servidor.
 - R2: el JSON del paso 2.5 con el mismo origen.
 
-## 8. Mistral OCR
+## 8. OCR
+
+El proveedor por defecto es **Tesseract** dentro de la imagen Docker (`tesseract-ocr` + `spa` +
+`lat`): no necesita claves ni cuotas. Se cambia en cualquier momento con `OCR_PROVIDER`
+(`tesseract`, `mistral`, `glm`) y un editor puede reprocesar un libro con otro proveedor
+(`POST /books/{id}/reprocesar` con `{ "ocr_proveedor": "glm" }`). Expectativa en Render free
+(0,1 CPU, 512 MB): ver la medición en `docs/EVALUACION_PIPELINE.md` (sección Tesseract); el
+tiempo por página escala aproximadamente con la CPU disponible.
+
+Un `429` con `x-ratelimit-limit-req-minute: 0` (plan sin OCR, caso visto con Mistral) es
+**permanente**: el trabajo pasa a `fallido` con "plan sin OCR habilitado" en vez de reintentar.
+
+**GLM-OCR (Z.ai)**: crear la clave en la consola de Z.ai, ponerla como `GLM_API_KEY` y fijar
+`OCR_PROVIDER=glm`. Endpoint `POST https://api.z.ai/api/paas/v4/layout_parsing` (modelo
+`glm-ocr`); sin clave en este proyecto no se probó en vivo, solo con transporte simulado
+(**verificar en el panel del proveedor** precios y límites).
+
+### Mistral (opcional)
 
 1. Crear la API key en la consola de Mistral (La Plateforme) y ponerla en Render
    como `MISTRAL_API_KEY`.

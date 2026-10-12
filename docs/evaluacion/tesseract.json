@@ -1,0 +1,89 @@
+{
+ "filas": [
+  {
+   "item": "astete-1787",
+   "modo": "ocr",
+   "paginas": 20,
+   "segundos": 126.0,
+   "odl_llamadas": 1,
+   "odl_segundos": 42.5,
+   "guiones_residuales_1k": 1.62,
+   "cer": 0.0904,
+   "wer": 0.1902,
+   "fuga": 0,
+   "fuga_total": 4,
+   "_libro_id": "eval-astete-1787",
+   "recall": 0.625,
+   "mrr": 0.562,
+   "consultas": 8
+  },
+  {
+   "item": "astete-1787",
+   "modo": "capa",
+   "paginas": 20,
+   "segundos": 75.9,
+   "odl_llamadas": 1,
+   "odl_segundos": 68.0,
+   "guiones_residuales_1k": 0.61,
+   "cer": 0.1061,
+   "wer": 0.2563,
+   "fuga": 0,
+   "fuga_total": 4,
+   "_libro_id": "eval-astete-1787-capa"
+  },
+  {
+   "item": "molinero-1695",
+   "modo": "ocr",
+   "paginas": 5,
+   "segundos": 293.1,
+   "odl_llamadas": 1,
+   "odl_segundos": 271.1,
+   "guiones_residuales_1k": 5.12,
+   "_libro_id": "eval-molinero-1695"
+  },
+  {
+   "item": "molinero-1695",
+   "modo": "capa",
+   "paginas": 5,
+   "segundos": 301.6,
+   "odl_llamadas": 1,
+   "odl_segundos": 297.4,
+   "guiones_residuales_1k": 0.0,
+   "_libro_id": "eval-molinero-1695-capa"
+  },
+  {
+   "item": "ordo-1812",
+   "modo": "ocr",
+   "paginas": 5,
+   "segundos": 88.6,
+   "odl_llamadas": 1,
+   "odl_segundos": 68.5,
+   "guiones_residuales_1k": 0.0,
+   "_libro_id": "eval-ordo-1812"
+  },
+  {
+   "item": "ordo-1812",
+   "modo": "capa",
+   "paginas": 5,
+   "segundos": 56.1,
+   "odl_llamadas": 1,
+   "odl_segundos": 50.6,
+   "guiones_residuales_1k": 0.0,
+   "_libro_id": "eval-ordo-1812-capa"
+  },
+  {
+   "item": "astete-1700-foto",
+   "modo": "ocr",
+   "paginas": 1,
+   "segundos": 2.4,
+   "odl_llamadas": 0,
+   "odl_segundos": 0.0,
+   "guiones_residuales_1k": 0.0,
+   "cer": 0.3502,
+   "wer": 0.6341,
+   "_libro_id": "eval-astete-1700-foto"
+  }
+ ],
+ "ocr_proveedor": "tesseract",
+ "ocr_llamadas_en_vivo": {}
+}

@@ -63,7 +63,7 @@ ENTRADA: un PDF (nombre arbitrario) · un set de imágenes · paginas/*.txt
         │
    (1) CLASIFICAR (pdf-inspector)  → ¿tiene capa de texto?
          ├── digital ─► (2a) TEXTO + GLIFOS (pypdfium2); ayudas visuales (opendataloader)
-        └── escaneado ─► (2b) OCR (Mistral)
+        └── escaneado ─► (2b) OCR (proveedor: Tesseract | Mistral | GLM-OCR)
         │
    (3) NORMALIZAR  orden de páginas · procedencia real (motor, confianza, imagen_url)
                    · texto plegado `texto_busqueda` · conteos
@@ -139,7 +139,7 @@ filtrar/facetar: `genero`, `autor_normalizado`, `titulo`, `autor`.
 | `services/pdf_classify.py` | Clasificación con pdf-inspector. |
 | `services/structure.py` | Bloques con bounding box (opendataloader) + `normalize_bbox`. |
 | `services/render.py` | Render de página a PNG y tamaño de página (pypdfium2). |
-| `services/ocr.py` | Cliente Mistral OCR (imagen / lista / PDF). |
+| `services/ocr.py` | Contrato y registro de proveedores OCR; fachada imagen / lista / PDF. Proveedores en `ocr_tesseract.py`, `ocr_mistral.py`, `ocr_glm.py`. |
 | `services/storage.py` | Almacenamiento por clave (`{libro_id}/{original}`, `{libro_id}/paginas/{n}.png`, `{libro_id}/figuras/{p}-{i}.png`): local bajo `MEDIA_ROOT` o S3-compatible (R2 en prod, SeaweedFS local) si hay `S3_ENDPOINT_URL` + `S3_BUCKET`. Mongo guarda **claves** en `imagen_url`; la URL se arma al responder (`media_url`: `/media/...` local, `S3_PUBLIC_BASE_URL` + clave o GET firmado). Al re-ingestar se poda todo objeto bajo `{libro_id}/` que el libro nuevo no referencia (páginas, recortes, originales). |
 | `services/text.py` | `fold_text`, patrón diacrítico-insensible, limpieza de Markdown. |
 | `services/naming.py` | `slugify` y orden natural. |
@@ -149,6 +149,43 @@ filtrar/facetar: `genero`, `autor_normalizado`, `titulo`, `autor`.
 | `services/citation.py` | Citas APA / Chicago / MLA. |
 | `services/jobs.py` | Cola Mongo de trabajos de ingesta + worker en proceso. |
 | `routers/jobs.py` | Subidas con URL firmada (`/uploads`) y estado (`/trabajos`). |
+
+## Proveedores de OCR (`services/ocr.py`)
+
+El pipeline depende de un contrato mínimo; cada proveedor es un módulo con:
+
+- `NAME` — se guarda como `motor` de la página (el `modelo` va aparte);
+- `missing_config() -> str | None` — por qué no puede correr aquí (`None` = listo);
+- `ocr_image(data, mime) -> OcrPage` — `texto`, `confianza` (o `None`), `bloques` con
+  `bbox_norm = [nx, ny, nw, nh]` (origen arriba-izquierda, igual que los bloques de PDF);
+- opcional `ocr_pdf(path)` — ruta nativa de PDF (Mistral). Sin ella, la fachada rasteriza cada
+  página a `OCR_DPI` y llama `ocr_image`.
+
+| Proveedor | Dónde corre | Bloques | Confianza |
+|---|---|---|---|
+| `tesseract` (defecto) | binario local (`tesseract-ocr` + `spa`/`lat` en la imagen Docker) | por línea | media de palabras / 100 |
+| `mistral` | API Mistral Document AI | no | si la API la expone |
+| `glm` | API Z.ai `POST /layout_parsing` (`layout_details[].bbox_2d` normalizado) | por región | no |
+
+`OCR_PROVIDER` elige el proveedor global; `ocr_proveedor` en `POST /uploads` o
+`POST /books/{id}/reprocesar` lo cambia para ese trabajo (`jobs.process` corre dentro de
+`ocr.use_provider(...)`). El guard de ingesta (`require_configured`) falla antes de tocar la red.
+
+**Agregar un proveedor en 3 pasos**:
+
+1. Crear `app/services/ocr_<nombre>.py` con `NAME`, `missing_config()` y `ocr_image()`; para
+   errores HTTP usar `ocr.raise_for_http(...)` (permanente vs reintentable).
+2. Registrar una línea en `PROVIDERS` de `services/ocr.py`.
+3. Añadir sus ajustes en `app/config.py` (y `render.yaml`/README), más una prueba con transporte
+   simulado.
+
+## opendataloader opcional (`OPENDATALOADER_ENABLED`)
+
+`structure.extract_structure` es el único punto que lanza la JVM. Con `false` devuelve vacío:
+el texto y los glifos siguen saliendo de PDFium, la página se indexa y se localiza con precisión
+`exacta`; se pierden las cajas de opendataloader y los recortes de figuras que dependen de ellas
+(las ayudas visuales que PDFium detecta por sí solo se conservan). Defecto `true` en local (sin
+cambios de comportamiento) y `false` en Render free (`render.yaml`), donde Java pesa en 512 MB.
 
 ## Cola de trabajos (`services/jobs.py`)
 
@@ -164,7 +201,7 @@ la drena:
   antes de persistir el libro y al marcarlo `completado`.
 - **Reintentos**: error transitorio → `pendiente` con backoff exponencial + jitter
   (30 s · 2^(n-1) · [1, 2), tope 1 h). `PermanentJobError` (tipos mezclados, sha256 distinto, sin
-  páginas) y OCR no configurado son permanentes; cualquier otro error se reintenta. Tras `max_intentos` (5) → `fallido`; también un trabajo que se cae
+  páginas), OCR no configurado y `OcrPermanentError` (clave inválida, plan sin OCR: `429` con `x-ratelimit-limit-req-minute: 0`, `4xx`) son permanentes; `OcrRetryableError` (`429` normal, `5xx`, red) se reintenta; cualquier otro error se reintenta. Tras `max_intentos` (5) → `fallido`; también un trabajo que se cae
   en bucle sin intentos restantes.
 - **Checkpoints por página** (`trabajo_paginas`): cada página terminada se guarda y un reintento
   salta las ya hechas. Un PDF se corta en PDFs de una página y cada uno pasa por los mismos builders

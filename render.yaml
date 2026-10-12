@@ -9,6 +9,14 @@ services:
       - {key: MONGODB_DB, value: biblioteca}
       - {key: MISTRAL_API_KEY, sync: false}
       - {key: MISTRAL_OCR_MODEL, value: mistral-ocr-latest}
+      # OCR provider registry (app/services/ocr.py): tesseract | mistral | glm
+      - {key: OCR_PROVIDER, value: tesseract}
+      - {key: OCR_LANGS, value: spa+lat}
+      - {key: GLM_API_KEY, sync: false}
+      - {key: GLM_OCR_MODEL, value: glm-ocr}
+      - {key: GLM_API_BASE_URL, value: "https://api.z.ai/api/paas/v4"}
+      # No JVM on 512 MB: PDFium text/positions only, no opendataloader visual aids
+      - {key: OPENDATALOADER_ENABLED, value: "false"}
       - {key: API_KEY, sync: false}
       - {key: CORS_ORIGINS, sync: false}
       # Consumed in task A1

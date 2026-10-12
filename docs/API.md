@@ -38,7 +38,7 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
 | `GET` | `/health` | `{ "status": "ok" }`. |
 | `POST` | `/ingest` | Ingesta un directorio del servidor. Body `{ "root": "..." }`. Devuelve resumen. |
 | `POST` | `/ingest/upload` | Ingesta multipart **síncrona** (operación/local): `files` (PDF o imágenes), `libro_id?`, `metadatos?` (JSON). |
-| `POST` | `/uploads` | Pide URLs PUT firmadas: `{ archivos: [{ nombre, tipo_contenido, tamano, sha256 }], metadatos? }`. |
+| `POST` | `/uploads` | Pide URLs PUT firmadas: `{ archivos: [{ nombre, tipo_contenido, tamano, sha256 }], metadatos?, ocr_proveedor? }`. `ocr_proveedor` (`tesseract` \| `mistral` \| `glm`, `422` si no existe) fija el OCR de ese trabajo; omitido usa `OCR_PROVIDER`. |
 | `POST` | `/uploads/{id}/completar` | Verifica (HEAD) los objetos subidos y encola el trabajo (`202`). |
 | `GET` | `/trabajos/{id}` | Estado público del trabajo: `estado`, `progreso`, `error`, `libro_id` (al completar). |
 | `GET` | `/yo` | `{ email, rol }` del token Bearer (`rol` null si no es editor); 401 sin token. |
@@ -47,7 +47,7 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
 | `DELETE` | `/editores/{email}` | Admin: baja (`204`, idempotente). |
 | `PATCH` | `/books/{libro_id}` | Editor: edita `metadatos` (`titulo`, `subtitulo`, `autor`, `autor_normalizado`, `editorial`, `anio_publicacion`, `idioma`, `genero`, `tradicion`, `isbn`, `temas`, `descripcion`); campos desconocidos → 422. Actualiza también `pages`. |
 | `DELETE` | `/books/{libro_id}` | Editor: borra libro, páginas, trabajos + checkpoints y media `{libro_id}/` (`204`, idempotente). |
-| `POST` | `/books/{libro_id}/reprocesar` | Editor: reencola el trabajo desde los originales guardados con los metadatos actuales (`202 { trabajo_id, estado }`); `409` si hay uno activo o el libro no vino de la cola. |
+| `POST` | `/books/{libro_id}/reprocesar` | Editor: reencola el trabajo desde los originales guardados con los metadatos actuales (`202 { trabajo_id, estado }`). Cuerpo opcional `{ ocr_proveedor }` para reprocesar con otro OCR (`422` si no existe); `409` si hay uno activo o el libro no vino de la cola. |
 | `GET` | `/search` | Búsqueda full-text. Params: `q` (oblig.), `genero`, `autor`, `limit` (1–100), `offset`. |
 | `GET` | `/facets` | Facetas: `{ "generos": [{ "valor", "count" }], "autores": [...] }`. |
 | `GET` | `/books` | Lista de metadatos. Params: `genero`, `autor` (contiene, sin diacríticos), `limit`, `offset`. |
@@ -65,8 +65,8 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
   conservan la localización aproximada anterior. `coincidencias` añade hasta
   8 coincidencias por resultado; el lector recalcula la lista con `/ref?q=`.
 - **`/ingest`** → `{ books, pages, books_processed, errors, fuentes }` donde
-  `fuentes` es un mapa `{ fuente: n_libros }`. Un libro que falla (p. ej. falta
-  `MISTRAL_API_KEY`) no aborta: queda en `errors[]` y la respuesta es `200`.
+  `fuentes` es un mapa `{ fuente: n_libros }`. Un libro que falla (p. ej. el OCR
+  activo no está disponible) no aborta: queda en `errors[]` y la respuesta es `200`.
 - **`/ingest/upload`** → `{ libro_id, books, pages, books_processed, errors,
   fuente }` (un solo libro, `fuente` escalar).
 - **`/cite`** → `{ cita, ref, estilo }`.
@@ -143,7 +143,7 @@ con carga, error, reintento y enlace al original.
 - `401`: falta/incorrecta `X-API-Key` cuando `API_KEY` está configurada.
 - `404`: libro/página/imagen inexistente.
 - `413`: subida supera `MAX_UPLOAD_BYTES`.
-- `422`: en `/ingest/upload`, la fuente requiere OCR y falta `MISTRAL_API_KEY`;
+- `422`: en `/ingest/upload`, la fuente requiere OCR y el proveedor activo (`OCR_PROVIDER`) no está disponible (binario o clave ausente);
   o parámetros fuera de rango. (En `/ingest` ese error va en `errors[]` con `200`.)
 
 ### Subidas firmadas y trabajos

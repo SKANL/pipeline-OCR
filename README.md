@@ -14,7 +14,7 @@ Documentación: `docs/PRODUCT_BRIEF.md`, `docs/ARCHITECTURE.md`, `docs/API.md` y
 - **pdf-inspector** para clasificar PDF (texto vs escaneado).
 - **opendataloader-pdf** para ayudas visuales y bloques aproximados con bounding box de PDFs digitales (requiere Java 11+); el texto y las posiciones de glifos salen de PDFium.
 - **pypdfium2** para renderizar cada página a imagen (verificación visual).
-- **Mistral Document AI** (`mistral-ocr-latest`) para OCR (PDF escaneado / imágenes).
+- **OCR intercambiable** (PDF escaneado / imágenes): **Tesseract** local (por defecto, `spa+lat`), **Mistral Document AI** o **GLM-OCR** (Z.ai), elegido con `OCR_PROVIDER`.
 - **uv** para entorno y dependencias.
 
 El pipeline de ingesta acepta tres fuentes por libro: `paginas/*.txt` (legado),
@@ -51,7 +51,14 @@ Variables de entorno:
 |---|---|---|
 | `MONGODB_URI` | URI de conexión a MongoDB | `mongodb://localhost:27017` |
 | `MONGODB_DB` | Nombre de la base de datos | `biblioteca` |
-| `MISTRAL_API_KEY` | API key de Mistral (OCR; requerida para PDF escaneado/imágenes) | _(vacío)_ |
+| `OCR_PROVIDER` | Proveedor de OCR: `tesseract`, `mistral` o `glm` (un trabajo puede pedir otro con `ocr_proveedor`) | `tesseract` |
+| `OCR_LANGS` | Idiomas de Tesseract | `spa+lat` |
+| `OCR_DPI` | Resolución con que se rasteriza un PDF escaneado para proveedores de imagen | `300` |
+| `OPENDATALOADER_ENABLED` | Ayudas visuales y bloques de opendataloader (Java). `false` => solo PDFium, sin figuras recortadas | `true` |
+| `GLM_API_KEY` | API key de Z.ai (proveedor `glm`) | _(vacío)_ |
+| `GLM_OCR_MODEL` | Modelo GLM-OCR | `glm-ocr` |
+| `GLM_API_BASE_URL` | Base de la API de Z.ai | `https://api.z.ai/api/paas/v4` |
+| `MISTRAL_API_KEY` | API key de Mistral (proveedor `mistral`) | _(vacío)_ |
 | `MISTRAL_OCR_MODEL` | Modelo de OCR | `mistral-ocr-latest` |
 | `MEDIA_ROOT` | Directorio raíz de originales almacenados (backend local) | `./_media` |
 | `S3_ENDPOINT_URL` | Endpoint S3-compatible (R2 / SeaweedFS `http://localhost:9000`); con `S3_BUCKET` activa el backend S3 | vacío |
@@ -166,7 +173,7 @@ app/
     locator.py       # texto/glifos nativos (PDFium) y coincidencias literales
     pdf_layout.py    # layout nativo: orden de lectura y ayudas visuales
     render.py        # render de páginas a PNG (pypdfium2)
-    ocr.py           # cliente Mistral OCR (imagen / lista / PDF)
+    ocr.py           # contrato + registro de proveedores OCR (ocr_tesseract/ocr_mistral/ocr_glm.py)
     storage.py       # almacenamiento por clave: local (MEDIA_ROOT) o S3 (R2/SeaweedFS)
     jobs.py          # cola Mongo de ingesta + worker en proceso
     scan.py          # preprocesado de fotos antes del OCR
