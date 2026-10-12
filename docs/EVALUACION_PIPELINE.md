@@ -78,3 +78,48 @@ Los PDF escaneados se clasifican como imagen, así que la ruta normal es OCR;
   (`medita-ción`): 9/9 cortes rotos.
 - **Costo de opendataloader**: la cola procesa un PDF de una página por vez y
   cada página lanza una JVM: ~1 s por página, 85–90 % del tiempo total.
+
+
+## Después de P2–P4 y del lote de opendataloader
+
+Entre paréntesis, la diferencia con la línea base.
+
+| Ítem | Modo | Págs | CER | WER | Fuga cab./pie | Cortes rotos | Guiones fin línea /1k | Recall@10 | MRR | Seg. | Seg. ODL | Sesgo residual ° | Orientación OK |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| astete-1787 | ocr ⚠ Error de OCR (PDF): API error occurred: Status 429. Body: {" | — | — | — | — | — | — | — | — | — | — | — | — |
+| astete-1787 | capa | 20 | 0.1061 (-0.0044) | 0.2563 (-0.0395) | 0/4 | n/a | 0.61 (+0.01) | 0.625 (+0.125) | 0.625 (+0.125) | 42.0 (-4.2) | 38.2 (-2.6) | n/a | n/a |
+| molinero-1695 | ocr ⚠ Error de OCR (PDF): API error occurred: Status 429. Body: {" | — | — | — | — | — | — | — | — | — | — | — | — |
+| molinero-1695 | capa | 5 | n/a | n/a | n/a | n/a | 0.0 | n/a | n/a | 261.8 (+215.8) | 258.4 (+216.2) | n/a | n/a |
+| ordo-1812 | ocr ⚠ Error de OCR (PDF): API error occurred: Status 429. Body: {" | — | — | — | — | — | — | — | — | — | — | — | — |
+| ordo-1812 | capa | 5 | n/a | n/a | n/a | n/a | 0.0 | n/a | n/a | 54.0 (+29.5) | 52.8 (+31.5) | n/a | n/a |
+| astete-1700-foto | ocr ⚠ Error de OCR (imagen): API error occurred: Status 429. Body: | — | — | — | — | — | — | — | — | — | — | — | — |
+| constitucion-1978 | digital | 39 | n/a | n/a | 0/117 (-116) | n/a | 0.0 | 1.0 | 1.0 | 12.9 (-99.1) | 5.1 (-91.6) | n/a | n/a |
+| sint-guiones | digital | 4 | 0.0 (-0.0594) | 0.0 (-0.0912) | 0/12 (-12) | 0/9 (-9) | 0.0 | 1.0 | 0.583 | 1.7 (-9.1) | 1.4 (-8.7) | n/a | n/a |
+| sint-dos-columnas | digital | 3 | 0.0 | 0.0 | n/a | n/a | 0.0 | 1.0 | 0.75 | 1.9 (-10.8) | 1.5 (-9) | n/a | n/a |
+| sint-tipografia | digital | 2 | 0.0 | 0.0 | n/a | n/a | 0.0 | 1.0 | 0.833 | 1.3 (-6.3) | 1.1 (-6.3) | n/a | n/a |
+| sint-foto-movil | geometria | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | 0.0 (-0.75) | True |
+| sint-libro | digital | 3 | 0.0 | 0.0 | n/a | n/a | 0.0 | 1.0 | 0.472 (-0.028) | 0.0 | 0.0 | n/a | n/a |
+
+### Lectura honesta
+
+- **P2 (limpieza)**: la fuga de cabeceras/pies baja de 116/117 a 0/117 (BOE) y de 12/12 a 0/12;
+  los cortes rotos bajan de 9/9 a 0/9; el CER de sint-guiones pasa de 0,0594 a 0. En la capa de
+  astete-1787 el WER baja de 0,296 a 0,256 y el recall sube de 0,5 a 0,625. Hubo una regresión
+  intermedia (un compuesto en la misma línea se unía por error en sint-dos-columnas, CER 0,0021);
+  se corrigió con una prueba antes de cerrar P2.
+- **P3 (preprocesado)**: la foto simulada llega al OCR derecha (antes estaba de costado) y con
+  sesgo residual 0°. Cuesta 0,7–0,9 s por foto. **No se midió su efecto en el OCR** (Mistral
+  dio 429).
+- **P4 (búsqueda)**: neutro en este conjunto de consultas (mismo recall y MRR). Las consultas
+  no dependen del título; el peso del título y el orden estable de los empates están cubiertos
+  por pruebas (`tests/test_search_relevance.py`). La baja de MRR en sint-libro (0,5 → 0,472)
+  viene de empates de puntaje con otros libros del corpus, no de cambios en su texto.
+- **opendataloader una vez por PDF original**: una JVM por libro en vez de una por página. En el
+  BOE (39 págs.) pasa de 112 s a 12,9 s (ODL de 96,7 s a 5,1 s). En molinero/ordo/astete el
+  tiempo **sube**, porque la evaluación procesa solo 5–20 páginas pero opendataloader ahora
+  analiza el libro completo (56/126/421 págs.). En un trabajo real se procesan todas las páginas,
+  así que pesa el costo por página: ~1 s antes contra ~0,1–0,6 s ahora. El límite es la memoria
+  que ocupa el JSON de un libro enorme (anotado como `ponytail:` en `jobs._structure`).
+- **OCR**: Mistral siguió respondiendo 429 en ambas corridas; 0 páginas consumidas. Las filas
+  `ocr` y la medición de P3 sobre la foto real quedan pendientes. Las respuestas se guardan en
+  caché por página, así que repetir la corrida no gasta páginas de nuevo.
