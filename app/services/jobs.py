@@ -10,7 +10,7 @@ API instance drains it:
 - heartbeat: after every page the lease is extended and `progreso` updated;
   a worker that lost its lease stops (`LeaseLost`).
 - retries: transient errors go back to `pendiente` with exponential backoff
-  plus jitter; `ValueError`/`OcrNotConfiguredError` are permanent; after
+  plus jitter; only `PermanentJobError`/`OcrNotConfiguredError` are permanent; after
   `max_intentos` the job is `fallido` with a public-safe `error`.
 - checkpoints: every finished page is stored in `trabajo_paginas`, so a retry
   skips pages already done; the book is assembled and persisted at the end.
@@ -62,6 +62,10 @@ _INTERNAL_ERROR = "Error interno al procesar el libro."
 
 class LeaseLost(Exception):
     """Another worker owns the job now (our lease expired)."""
+
+
+class PermanentJobError(Exception):
+    """Retrying cannot help (bad input); the message is shown to the user."""
 
 
 def _now() -> datetime:
@@ -151,8 +155,8 @@ def heartbeat(job: dict, *, paginas_hechas: int, paginas_total: int) -> None:
 def fail(job: dict, exc: Exception) -> None:
     """Record a failure: retry later with backoff, or `fallido` when exhausted/permanent."""
     now = _now()
-    permanent = isinstance(exc, (ValueError, OcrNotConfiguredError))
-    if isinstance(exc, ValueError):
+    permanent = isinstance(exc, (PermanentJobError, OcrNotConfiguredError))
+    if isinstance(exc, PermanentJobError):
         public = str(exc)
     elif isinstance(exc, OcrNotConfiguredError):
         public = "El libro requiere OCR y el OCR no está disponible en este servidor."
@@ -169,10 +173,12 @@ def fail(job: dict, exc: Exception) -> None:
 
 
 def complete(job: dict, *, paginas: int) -> None:
-    jobs_collection().update_one(_owned(job), {"$set": {
+    result = jobs_collection().update_one(_owned(job), {"$set": {
         "estado": "completado", "error": None, "bloqueado_hasta": None, "actualizado_en": _now(),
         "progreso": {"paginas_hechas": paginas, "paginas_total": paginas},
     }})
+    if result.matched_count == 0:
+        raise LeaseLost(str(job["_id"]))
 
 
 def _sweep_exhausted() -> None:
@@ -230,7 +236,7 @@ def process(job: dict) -> int:
     archivos = job["archivos"]
     kinds = {CONTENT_TYPES[a["tipo_contenido"]][0] for a in archivos}
     if len(kinds) != 1:
-        raise ValueError("Todos los archivos de un libro deben ser del mismo tipo.")
+        raise PermanentJobError("Todos los archivos de un libro deben ser del mismo tipo.")
     kind = kinds.pop()
 
     paths = []
@@ -238,13 +244,13 @@ def process(job: dict) -> int:
         path = storage.path(archivo["clave"])
         with path.open("rb") as handle:
             if hashlib.file_digest(handle, "sha256").hexdigest() != archivo["sha256"]:
-                raise ValueError(f"El archivo {archivo['nombre']} no coincide con su sha256 declarado.")
+                raise PermanentJobError(f"El archivo {archivo['nombre']} no coincide con su sha256 declarado.")
         paths.append(path)
 
     counts = [_page_count(kind, path) for path in paths]
     total = sum(counts)
     if total == 0:
-        raise ValueError("Los archivos no contienen páginas.")
+        raise PermanentJobError("Los archivos no contienen páginas.")
 
     checkpoints = job_pages_collection()
     done = {c["numero"] for c in checkpoints.find({"trabajo_id": job["_id"]}, {"numero": 1})}
@@ -284,6 +290,8 @@ def process(job: dict) -> int:
     )
     if job.get("creado_por"):
         libro["creado_por"] = job["creado_por"]
+    # ponytail: re-check the lease right before writing; a steal inside _persist itself still races.
+    heartbeat(job, paginas_hechas=total, paginas_total=total)
     ingest._persist(libro, storage, originals=[a["clave"] for a in archivos])
     checkpoints.delete_many({"trabajo_id": job["_id"]})
     return total

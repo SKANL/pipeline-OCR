@@ -198,3 +198,27 @@ def test_upload_body_is_json_only() -> None:
     response = client.post("/api/v1/uploads", content=json.dumps({"archivos": "x"}),
                            headers={"Content-Type": "application/json"})
     assert response.status_code == 422
+
+
+@needs_mongo
+def test_local_storage_501_leaves_no_orphan_job(queue) -> None:
+    from app.db import jobs_collection
+
+    data = b"sin s3"
+    response = client.post("/api/v1/uploads", json={"archivos": [_file("l.txt", data, "text/plain")]})
+    assert response.status_code == 501
+    assert jobs_collection().count_documents({"sha256": _sha(data)}) == 0
+
+
+@needs_mongo
+def test_failed_upload_is_reopened_for_the_same_bytes(queue, s3) -> None:
+    from app.db import jobs_collection
+
+    body = {"archivos": [_file("f.txt", b"fallo", "text/plain")], "metadatos": {"titulo": "Nuevo"}}
+    upload = client.post("/api/v1/uploads", json=body).json()
+    jobs_collection().update_one({}, {"$set": {"estado": "fallido", "intentos": 5, "error": "x"}})
+    again = client.post("/api/v1/uploads", json=body)
+    assert again.status_code == 201
+    assert again.json()["id"] == upload["id"] and again.json()["archivos"]
+    doc = jobs.get_job(upload["id"])
+    assert (doc["estado"], doc["intentos"], doc["error"], doc["metadatos"]) == ("esperando_subida", 0, None, {"titulo": "Nuevo"})

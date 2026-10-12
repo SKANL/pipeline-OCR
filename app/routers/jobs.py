@@ -80,6 +80,8 @@ def create_upload(payload: SubidaRequest, response: Response, editor: dict = Dep
     """Devuelve URLs PUT firmadas, o el trabajo/libro existente si el contenido ya se subió."""
     _validate(payload.archivos)
     storage = storage_service.get_storage()
+    if isinstance(storage, storage_service.LocalStorage):  # cannot presign: fail before creating a job
+        raise HTTPException(501, "Presigned uploads require the S3 backend (S3_ENDPOINT_URL).")
     digest = jobs.upload_digest([a.sha256 for a in payload.archivos])
     existing = jobs_collection().find_one({"sha256": digest})
 

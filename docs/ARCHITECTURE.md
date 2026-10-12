@@ -121,10 +121,11 @@ la drena:
   o uno `procesando` cuyo lease (`bloqueado_hasta`) venció porque la instancia durmió o cayó. Cada
   claim suma un intento.
 - **Lease + heartbeat**: lease de 5 min, renovado tras cada página junto con `progreso`. Si otro
-  worker tomó el trabajo, el anterior se detiene (`LeaseLost`).
+  worker tomó el trabajo, el anterior se detiene (`LeaseLost`); el lease se verifica también justo
+  antes de persistir el libro y al marcarlo `completado`.
 - **Reintentos**: error transitorio → `pendiente` con backoff exponencial + jitter
-  (30 s · 2^(n-1) · [1, 2), tope 1 h). `ValueError` (validación, sha256 distinto) y OCR no
-  configurado son permanentes. Tras `max_intentos` (5) → `fallido`; también un trabajo que se cae
+  (30 s · 2^(n-1) · [1, 2), tope 1 h). `PermanentJobError` (tipos mezclados, sha256 distinto, sin
+  páginas) y OCR no configurado son permanentes; cualquier otro error se reintenta. Tras `max_intentos` (5) → `fallido`; también un trabajo que se cae
   en bucle sin intentos restantes.
 - **Checkpoints por página** (`trabajo_paginas`): cada página terminada se guarda y un reintento
   salta las ya hechas. Un PDF se corta en PDFs de una página y cada uno pasa por los mismos builders
