@@ -106,3 +106,11 @@ def test_s3_delete_prefix_logs_per_key_errors(s3, monkeypatch, caplog) -> None:
     with caplog.at_level("ERROR"):
         s3.delete_prefix("b/")
     assert "b/paginas/1.png" in caplog.text and "AccessDenied" in caplog.text
+
+
+def test_presigned_urls_use_presign_endpoint() -> None:
+    storage = S3Storage(endpoint_url="http://s3:9000", presign_endpoint_url="http://localhost:9000",
+                        access_key_id="x", secret_access_key="x", bucket=BUCKET, region="auto")
+    assert storage.presign_put("b/x.pdf", "application/pdf").startswith("http://localhost:9000/")
+    assert storage.url("b/x.pdf").startswith("http://localhost:9000/")
+    assert storage.client.meta.endpoint_url == "http://s3:9000"

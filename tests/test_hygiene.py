@@ -156,3 +156,12 @@ def test_ingest_rejects_bad_root(client: TestClient, root: str, monkeypatch: pyt
     assert response.status_code == 400
     get_settings.cache_clear()
     assert "raíz" in response.json()["detail"]
+
+
+def test_empty_env_values_fall_back_to_defaults(monkeypatch) -> None:
+    from app.config import Settings
+
+    monkeypatch.setenv("MAX_FILE_BYTES", "")
+    monkeypatch.setenv("PAGE_IMAGE_DPI", "")
+    settings = Settings()
+    assert settings.max_file_bytes > 0 and settings.page_image_dpi > 0

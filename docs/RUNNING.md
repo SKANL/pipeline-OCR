@@ -19,7 +19,7 @@ La PWA vive en el repo **hermano**: `..\biblioteca-eclesiastica-web`
 ## 1. MongoDB y S3 local
 
 ```powershell
-docker compose up -d   # Mongo :27017 y SeaweedFS (S3) :9000, ambos solo en 127.0.0.1; bucket `biblioteca` creado por `s3-init`
+docker compose up -d mongo s3 s3-init   # Mongo :27017 y SeaweedFS (S3) :9000, ambos solo en 127.0.0.1; bucket `biblioteca` creado por `s3-init`
 docker compose down    # detener (los volúmenes se conservan)
 ```
 
@@ -103,6 +103,30 @@ pública y no los necesita. El cliente OAuth de Google debe aceptar
 - ⚠️ Rebuildear **sin** `next start` corriendo y reiniciar después (si no, quedan
   chunks viejos → la UI se rompe).
 - El service worker solo se registra en producción (`next start`), no en `dev`.
+
+## Todo en Docker (como producción)
+
+Requiere el repo de la PWA clonado como carpeta hermana:
+`C:\code\pipeline-OCR` y `C:\code\biblioteca-eclesiastica-web`.
+
+```powershell
+docker compose up -d --build   # Mongo, S3 (+bucket), API (+worker, Tesseract, Java) y PWA (next build + server)
+```
+
+- PWA: http://localhost:3010 — login de desarrollo con `admin@biblioteca.local`
+  (o `LOCAL_ADMIN_EMAIL`), que además es admin de la API.
+- API: http://localhost:8000 (`/health`, `/docs`); S3: http://localhost:9000.
+- Todos los puertos quedan en `127.0.0.1`. Los secretos son **solo de desarrollo**
+  (`LOCAL_AUTH_SECRET` en `.env` para cambiarlos); nunca usarlos en producción.
+- `.env` es opcional: se carga en la API, pero Mongo, S3, CORS, worker y auth
+  quedan fijados por `docker-compose.yml`.
+- Las URLs firmadas usan `S3_PRESIGN_ENDPOINT_URL=http://localhost:9000` (lo que ve
+  el navegador); la API habla con S3 por `http://s3:9000`.
+- Logs: `docker compose logs -f api` (o `web`, `mongo`, `s3`). Estado: `docker compose ps`.
+- Tras cambiar código: `docker compose up -d --build` de nuevo.
+- Detener: `docker compose down` (conserva datos).
+  **Borrar todo** (libros, páginas, archivos de S3): `docker compose down -v` —
+  irreversible.
 
 ## Correr ambos de una (desde acá)
 

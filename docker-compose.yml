@@ -1,4 +1,5 @@
-# Local dev infra only. The API runs with uv (see docs/RUNNING.md).
+# Local stack. `docker compose up -d mongo s3 s3-init` = infra only (API/PWA native);
+# `docker compose up -d --build` = everything, PWA built from ../biblioteca-eclesiastica-web.
 # S3: SeaweedFS (MinIO no longer publishes public images). Same S3 API as Cloudflare R2.
 services:
   mongo:
@@ -26,6 +27,50 @@ services:
       aws --endpoint-url http://s3:9000 s3 mb s3://biblioteca && exit 0;
       sleep 2; done; exit 1"
     restart: "no"
+
+  api:
+    build: .
+    depends_on:
+      mongo: {condition: service_started}
+      s3-init: {condition: service_completed_successfully}
+    env_file: [{path: .env, required: false}]
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      S3_ENDPOINT_URL: http://s3:9000
+      S3_PRESIGN_ENDPOINT_URL: http://localhost:9000  # signed URLs are used by the browser
+      S3_ACCESS_KEY_ID: local
+      S3_SECRET_ACCESS_KEY: local
+      S3_BUCKET: biblioteca
+      S3_PUBLIC_BASE_URL: ""
+      CORS_ORIGINS: http://localhost:3010
+      WORKER_ENABLED: "true"
+      OCR_PROVIDER: tesseract
+      OPENDATALOADER_ENABLED: ${LOCAL_OPENDATALOADER_ENABLED:-true}
+      # DEV-ONLY default secret, shared with the web service below. Never use in production.
+      AUTH_SECRET: ${LOCAL_AUTH_SECRET:-dev-only-insecure-local-auth-secret}
+      ADMIN_EMAILS: ${LOCAL_ADMIN_EMAIL:-admin@biblioteca.local}
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      retries: 30
+
+  web:
+    build:
+      context: ../biblioteca-eclesiastica-web  # sibling clone required
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000  # browser -> API
+    depends_on:
+      api: {condition: service_healthy}
+    environment:
+      API_BASE_URL: http://api:8000  # server-side -> API
+      API_AUTH_SECRET: ${LOCAL_AUTH_SECRET:-dev-only-insecure-local-auth-secret}
+      AUTH_SECRET: dev-only-insecure-local-session-secret  # DEV-ONLY session cookie secret
+      AUTH_TRUST_HOST: "true"
+      AUTH_URL: http://localhost:3010
+      AUTH_DEV_LOGIN: "true"
+      AUTH_DEV_EMAILS: ${LOCAL_ADMIN_EMAIL:-admin@biblioteca.local}
+    ports: ["127.0.0.1:3010:3010"]
 
 volumes:
   mongo-data:
