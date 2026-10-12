@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0.0",
+  "libro_id": "slug-unico-del-libro",
+
+  "metadatos": {
+    "titulo": "Titulo completo de la obra",
+    "subtitulo": null,
+    "autor": "Nombre del autor",
+    "autor_normalizado": "apellido, nombre",
+    "editorial": null,
+    "anio_publicacion": null,
+    "idioma": "es",
+    "genero": "teologia",
+    "tradicion": null,
+    "isbn": null,
+    "temas": [],
+    "descripcion": null
+  },
+
+  "procedencia": {
+    "fuente": "texto",
+    "scan_base_url": null,
+    "ocr": {
+      "motor": null,
+      "modelo": null,
+      "fecha": null,
+      "confianza_media": null
+    }
+  },
+
+  "origen": [
+    "documento.pdf"
+  ],
+
+  "estado_ingesta": "pending",
+
+  "capitulos": [
+    {
+      "numero": 1,
+      "titulo": "Titulo del capitulo",
+      "pagina_inicio": 1,
+      "pagina_fin": 10
+    }
+  ],
+
+  "paginas": [
+    {
+      "numero": 1,
+      "ref": "slug-unico-del-libro/pagina/1",
+      "capitulo_numero": 1,
+      "texto": "Texto completo extraido de la pagina.",
+      "conteo_palabras": 0,
+      "conteo_caracteres": 0,
+      "ocr_confianza": null,
+      "imagen_url": null,
+      "imagen_ancho": null,
+      "imagen_alto": null,
+      "motor": "pdf-inspector",
+      "bbox": null,
+      "advertencia_localizacion": null,
+      "lectura": [],
+      "posiciones": [],
+      "bloques": [
+        {
+          "bbox": [72.0, 727.525, 339.806, 740.241],
+          "texto": "Texto del bloque extraido de la pagina.",
+          "bbox_norm": [0.12095, 0.12074, 0.44989, 0.0151],
+          "tipo": "paragraph",
+          "orden": 1
+        }
+      ],
+      "figuras": [
+        {
+          "bbox": [72.0, 600.0, 180.0, 700.0],
+          "bbox_norm": null,
+          "imagen_url": null,
+          "imagen_ancho": null,
+          "imagen_alto": null,
+          "tipo": "image",
+          "orden": 2,
+          "orden_fuente": 2,
+          "pie": null,
+          "texto_alternativo": "Recorte de la página 1; consultar la página original para el contexto completo.",
+          "estado": "pagina_original",
+          "advertencia": "Ejemplo sin recorte guardado; consulte la página original."
+        }
+      ]
+    }
+  ],
+
+  "caracteres_totales": 0,
+  "conteo_paginas": 0,
+  "conteo_palabras_total": 0,
+  "creado_en": null,
+  "actualizado_en": null
+}

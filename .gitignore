@@ -1,0 +1,12 @@
+.env
+.venv
+__pycache__/
+.pytest_cache/
+*.pyc
+_media/
+# Local input corpus: preserved on disk, provision explicitly on other machines.
+/tests/fixtures/real-pdfs/
+/tests/fixtures/text-books/
+/tests/fixtures/generated-pdfs/
+.atl/
+.playwright-cli/
