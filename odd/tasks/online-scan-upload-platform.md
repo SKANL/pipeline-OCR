@@ -63,17 +63,22 @@ pipeline output quality is measured and improved.
   - Checks: pytest 160 passed / 39 skipped (MONGODB_URI=mongodb://127.0.0.1:1, all skips Mongo-unreachable), 199 passed (local Mongo, biblioteca_test); compileall OK.
 
 ### PWA
-- [ ] W1 Auth.js Google login, editor area, server-side API proxy/token minting.
-- [ ] W2 Scan/upload: camera capture, multi-image, reorder/remove, metadata, presigned upload with progress/retry, job status polling with backoff.
-- [ ] W3 Book management UI (edit metadata, delete, reprocess).
-- [ ] W4 UX: fix "Limpiar", title search, library empty state, remembered view mode, match count/navigation, OCR confidence badge, debounced search, throttled reading progress, text size/dark mode, go-to-page, resume reading.
-- [ ] W5 Service worker: offline shell + recently read pages.
+- [x] W1 Auth.js Google login, editor area, server-side API proxy/token minting.
+- [x] W2 Scan/upload: camera capture, multi-image, reorder/remove, metadata, presigned upload with progress/retry, job status polling with backoff.
+- [x] W3 Book management UI (edit metadata, delete, reprocess).
+- [x] W4 UX: fix "Limpiar", title search, library empty state, remembered view mode, match count/navigation, OCR confidence badge, debounced search, throttled reading progress, text size/dark mode, go-to-page, resume reading.
+- [x] W5 Service worker: offline shell + recently read pages.
 
 ### Close
-- [ ] D1 Docs + deployment guide (Vercel, Render, Atlas, R2, Google OAuth, Mistral); end-to-end verification.
+- [x] D1 Docs + deployment guide (Vercel, Render, Atlas, R2, Google OAuth, Mistral); end-to-end verification.
+  - Evidence: docs/DESPLIEGUE.md new; ARCHITECTURE (system + upload ASCII diagrams), RUNNING, README, PWA README updated against code. Local E2E on DB `biblioteca_e2e` (API :8010, SeaweedFS, minted HS256 token): unauth 401, /yo admin, POST /uploads, presigned PUT 200, completar 202, job completado 3/3 pages (~100 s: JVM per PDF), search hit, /ref?q= with matches + page image 200, /cite apa, PATCH, reprocesar completado (edited title kept), DELETE 204 + 404 + media prefix 0 objects. PWA prod build (NEXT_PUBLIC_API_BASE_URL=:8010) on :3011: /, /buscar?q=gracia, /biblioteca, /libro/{id}, /libro/{id}/pagina/1 (+?q=) all 200 with expected text. Servers stopped, DB dropped. NOT verified: Google login (needs OAuth client), R2, Render, Vercel, Mistral (no calls). Gap found: no flag to disable opendataloader (JVM) on Render free.
 
 ## Progress / evidence
-(per task: commit, checks, review outcome)
+Summary: Infra I1, API A1-A7 and Pipeline P1-P4 done (API repo, branch chain feat/op-01..09). PWA W1-W5 done in the PWA repo
+(login/editor, signed upload + job polling, book management, UX, service worker; commits 9127f57, 1d78f56, 839c4af, aa3f10c,
+e10964b, f48a4fc, 52878d5, 27d0122 on feat/op-08-ux), D1 docs on feat/op-09-docs in both repos. Per-task evidence is under each task above.
+Open items for the user: provision Atlas/R2/Render/Vercel/Google per docs/DESPLIEGUE.md, push and open PRs, live Mistral check (429 seen in P1).
+W1-W5 ticked from the PWA git log (commits listed above), not re-verified here beyond the production build and public-page checks.
 
 ## Delivery
 - Strategy: feature-branch-chain (user, 2026-10-11). Tracker branch `feat/online-platform` (draft/no-merge PR when pushed).
