@@ -336,12 +336,9 @@ def _assemble_libro(
 
 
 def _require_ocr_if_needed(*, needs_ocr: bool) -> None:
-    """Guarda de OCR: sin API key no se puede rutear a OCR."""
-    if needs_ocr and not get_settings().mistral_api_key:
-        raise OcrNotConfiguredError(
-            "La fuente requiere OCR (PDF escaneado o imágenes) pero "
-            "MISTRAL_API_KEY no está configurada en el entorno (.env)."
-        )
+    """OCR guard: the active provider must be usable before routing to OCR."""
+    if needs_ocr:
+        ocr_service.require_configured()
 
 
 def _pages_from_result(
@@ -355,7 +352,7 @@ def _pages_from_result(
             "motor": p.motor,
             "imagen_url": p.imagen_url,
             "bbox": None,
-            "bloques": [],
+            "bloques": p.bloques,
         }
         for p in result.paginas
     ]
@@ -638,7 +635,8 @@ def _apply_pdf_verification(
         numero = first_page + index
         if index < len(image_urls):
             page["imagen_url"] = image_urls[index]
-        page["bloques"] = bloques_por_pagina.get(numero, [])
+        # OCR line/layout blocks survive when opendataloader found none.
+        page["bloques"] = bloques_por_pagina.get(numero) or page.get("bloques") or []
         page["figuras"] = figuras_por_pagina.get(numero, [])
         if index < len(image_sizes) and image_sizes[index]:
             page["imagen_ancho"], page["imagen_alto"] = image_sizes[index]
@@ -723,6 +721,7 @@ def _extract_pdf_source(
                         "texto": page.texto,
                         "ocr_confianza": page.confianza,
                         "motor": page.motor,
+                        "bloques": page.bloques,
                     }
                 )
             motor = result.motor or motor

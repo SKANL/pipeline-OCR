@@ -61,11 +61,16 @@ def test_reprocess_requeues_with_edited_metadata_and_409_when_active(queue, s3) 
     response = client.post("/api/v1/books/libro-cola/reprocesar")
     assert response.status_code == 202, response.text
     assert response.json() == {"trabajo_id": job_id, "estado": "pendiente"}
+    assert jobs.get_job(job_id).get("ocr_proveedor") is None
     assert client.post("/api/v1/books/libro-cola/reprocesar").status_code == 409
     assert jobs.run_once("w-books") is True
     assert jobs.get_job(job_id)["estado"] == "completado"
     assert books_collection().find_one({"libro_id": "libro-cola"})["metadatos"]["titulo"] == "Editado"
     assert client.post("/api/v1/books/no-existe/reprocesar").status_code == 404
+    response = client.post("/api/v1/books/libro-cola/reprocesar", json={"ocr_proveedor": "glm"})
+    assert response.status_code == 202, response.text
+    assert jobs.get_job(job_id)["ocr_proveedor"] == "glm"
+    assert client.post("/api/v1/books/libro-cola/reprocesar", json={"ocr_proveedor": "nope"}).status_code == 422
 
 
 @needs_mongo

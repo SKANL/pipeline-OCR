@@ -18,6 +18,8 @@ dependencies = [
     "pypdfium2>=4.30",
     "boto3>=1.43.111",
     "pyjwt>=2.15.1",
+    "pytesseract>=0.3.13",
+    "httpx>=0.27",
 ]
 
 [dependency-groups]
