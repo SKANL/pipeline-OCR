@@ -257,6 +257,14 @@ def test_mixed_images_and_documents_are_rejected() -> None:
 
 
 @needs_mongo
+def test_pdf_and_text_in_one_upload_become_separate_books(queue, s3) -> None:
+    body = {"archivos": [_file("a.pdf", b"x", "application/pdf"), _file("b.txt", b"y", "text/plain")]}
+    response = client.post("/api/v1/uploads", json=body)
+    assert response.status_code == 201, response.text
+    assert len(response.json()["trabajos"]) == 2
+
+
+@needs_mongo
 def test_job_etapa_follows_the_worker(queue, s3, monkeypatch) -> None:
     from app.services import ingest
 

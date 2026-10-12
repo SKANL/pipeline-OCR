@@ -58,7 +58,7 @@ def _validate(archivos: list[ArchivoSubida]) -> None:
             raise HTTPException(413, f"{archivo.nombre} supera el límite de {settings.max_file_bytes} bytes.")
     if sum(a.tamano for a in archivos) > settings.max_upload_bytes:
         raise HTTPException(413, f"La subida supera el límite de {settings.max_upload_bytes} bytes.")
-    if len({jobs.CONTENT_TYPES[a.tipo_contenido][0] for a in archivos}) > 1:
+    if len({jobs.CONTENT_TYPES[a.tipo_contenido][0] == "image" for a in archivos}) > 1:
         raise HTTPException(422, "No se pueden mezclar imágenes con documentos (PDF o texto) "
                                  "en una misma subida.")
 
