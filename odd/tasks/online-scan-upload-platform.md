@@ -56,3 +56,8 @@ pipeline output quality is measured and improved.
 
 ## Progress / evidence
 (per task: commit, checks, review outcome)
+
+## Delivery
+- Strategy: feature-branch-chain (user, 2026-10-11). Tracker branch `feat/online-platform` (draft/no-merge PR when pushed).
+- Child branches, each from the previous: `feat/op-01-infra` (I1), `feat/op-02-storage` (A1, A7), `feat/op-03-jobs` (A2, A3), `feat/op-04-auth` (A4, A5, A6), `feat/op-05-pipeline` (P1–P4), PWA repo `feat/op-06..` (W1–W5), `feat/op-09-docs` (D1).
+- Push and PR creation remain the user's decision.
