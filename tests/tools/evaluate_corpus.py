@@ -57,7 +57,7 @@ def corpus() -> list[dict]:
     gt = wikisource_pages(PD / "astete-1787-scan/astete-1787.gt.txt")
     astete_pages = sorted(gt)[:20]
     items = [
-        {"slug": "astete-1787", "kind": "pdf", "path": PD / "astete-1787-scan/astete-1787.pdf",
+        {"slug": "astete-1787", "kind": "pdf", "titulo": "Catecismo de la Doctrina Cristiana", "path": PD / "astete-1787-scan/astete-1787.pdf",
          "pages": astete_pages, "modos": ["ocr", "capa"],
          "gt": [gt[n]["texto"] for n in astete_pages], "mobiliario": [gt[n]["mobiliario"] for n in astete_pages],
          "consultas": [("santiguar", 12), ("cautividad", 12), ("advenimiento", 13), ('"valle de lagrimas"', 16),
@@ -68,7 +68,7 @@ def corpus() -> list[dict]:
          "pages": list(range(10, 15)), "modos": ["ocr", "capa"]},
         {"slug": "astete-1700-foto", "kind": "image", "path": PD / "astete-1700-page-photo/astete-1700.jpg",
          "pages": [1], "modos": ["ocr"], "gt": [PHOTO_GT], "gt_nota": "transcripción manual"},
-        {"slug": "constitucion-1978", "kind": "pdf",
+        {"slug": "constitucion-1978", "kind": "pdf", "titulo": "Constitución Española",
          "path": PD / "constitucion-1978-boe-digital/constitucion-1978.pdf", "pages": None, "modos": ["digital"],
          "mobiliario_fn": lambda n: ["BOLETÍN OFICIAL DEL ESTADO", "LEGISLACIÓN CONSOLIDADA", f"Página {n}"],
          "consultas": [('"reunion pacifica"', 7), ('"tribunales de honor"', 7), ("secuestro publicaciones", 6),

@@ -139,7 +139,8 @@ def search_pages(
     total = pages.count_documents(filters)
     cursor = (
         pages.find(filters, {"score": {"$meta": "textScore"}})
-        .sort([("score", {"$meta": "textScore"})])
+        # Tie-breakers keep pagination stable (equal scores are common).
+        .sort([("score", {"$meta": "textScore"}), ("libro_id", 1), ("numero", 1)])
         .skip(offset)
         .limit(limit)
     )

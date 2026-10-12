@@ -185,6 +185,7 @@ def build_page_projection(libro_id: str, pagina: dict, metadatos: dict) -> dict:
         "capitulo_numero": pagina.get("capitulo_numero"),
         "texto": texto,
         "texto_busqueda": fold_text(texto),
+        "titulo_busqueda": fold_text(metadatos.get("titulo") or ""),
         "conteo_palabras": pagina.get("conteo_palabras", 0),
         "conteo_caracteres": pagina.get("conteo_caracteres", 0),
         "ocr_confianza": pagina.get("ocr_confianza"),

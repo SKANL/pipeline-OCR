@@ -26,7 +26,7 @@ from app.ratelimit import limit_write
 from app.security import require_editor
 from app.services import storage as storage_service
 from app.services.storage import LocalStorage, get_storage, media_url
-from app.services.text import make_diacritic_insensitive_pattern
+from app.services.text import fold_text, make_diacritic_insensitive_pattern
 from app.services.locator import locate_matches
 
 router = APIRouter(tags=["books"])
@@ -255,6 +255,8 @@ def update_book(libro_id: str, payload: LibroPatch) -> dict:
         books_collection().update_one({"libro_id": libro_id}, {"$set": {
             **{f"metadatos.{k}": v for k, v in changes.items()}, "actualizado_en": datetime.now(timezone.utc)}})
         page_changes = {k: v for k, v in changes.items() if k in _PAGE_FIELDS}
+        if "titulo" in page_changes:
+            page_changes["titulo_busqueda"] = fold_text(page_changes["titulo"])
         if page_changes:
             pages_collection().update_many({"libro_id": libro_id}, {"$set": page_changes})
     return get_book(libro_id)
