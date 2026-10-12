@@ -12,7 +12,7 @@ and the editor saw no visible progress, so they could not tell whether processin
 
 ## Tasks
 - [x] U1 API: job `etapa` field + progress per step; split PDF/TXT uploads into one job per file; `GET /trabajos` (mine, recent) for editors.
-- [ ] U2 PWA: per-file titles for multi-document uploads; step tracker on the job page and right after upload; "Mis subidas" list with polling.
+- [x] U2 PWA: per-file titles for multi-document uploads; step tracker on the job page and right after upload; "Mis subidas" list with polling.
 
 ## Checks
 API: `uv run pytest` + compileall (TDD strict). PWA: lint, typegen+tsc, `npm test`, build; browser check against the running local stack.
