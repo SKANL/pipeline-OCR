@@ -119,9 +119,46 @@ def test_failure_backs_off_then_fails_after_max_attempts(queue, s3) -> None:
 def test_permanent_error_fails_immediately(queue, s3) -> None:
     _txt_job(s3, b"uno")
     job = jobs.claim("w1")
-    jobs.fail(job, ValueError("Tipo no soportado."))
+    jobs.fail(job, jobs.PermanentJobError("Tipo no soportado."))
     doc = queue.find_one({"_id": job["_id"]})
     assert doc["estado"] == "fallido" and doc["error"] == "Tipo no soportado."
+
+
+@needs_mongo
+def test_plain_value_error_is_retried_not_permanent(queue, s3) -> None:
+    _txt_job(s3, b"uno")
+    job = jobs.claim("w1")
+    jobs.fail(job, ValueError("glitch en una libreria"))
+    doc = queue.find_one({"_id": job["_id"]})
+    assert doc["estado"] == "pendiente" and "glitch" not in doc["error"]
+
+
+@needs_mongo
+def test_lease_lost_before_finalize_does_not_persist(queue, s3, monkeypatch) -> None:
+    from app.db import books_collection
+    from app.services import ingest
+
+    books_collection().delete_many({"libro_id": "libro-cola"})
+    job_id = _txt_job(s3, b"uno")
+    real = ingest._assemble_libro
+
+    def steal(**kwargs):
+        queue.update_one({}, {"$set": {"worker_id": "w-otro"}})
+        return real(**kwargs)
+
+    monkeypatch.setattr(ingest, "_assemble_libro", steal)
+    jobs.run_once("w1")
+    assert books_collection().find_one({"libro_id": "libro-cola"}) is None
+    assert jobs.get_job(job_id)["worker_id"] == "w-otro"
+
+
+@needs_mongo
+def test_complete_raises_when_lease_lost(queue, s3) -> None:
+    _txt_job(s3, b"uno")
+    job = jobs.claim("w1")
+    queue.update_one({"_id": job["_id"]}, {"$set": {"worker_id": "w2"}})
+    with pytest.raises(jobs.LeaseLost):
+        jobs.complete(job, paginas=1)
 
 
 @needs_mongo

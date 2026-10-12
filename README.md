@@ -62,7 +62,12 @@ Variables de entorno:
 | `MAX_FILE_BYTES` | Límite por archivo en subidas firmadas (bytes) | `52428800` |
 | `WORKER_ENABLED` | Worker de la cola de ingesta dentro del proceso de la API | `true` |
 | `PAGE_IMAGE_DPI` | Resolución del render PDF -> PNG | `150` |
-| `API_KEY` | Si no está vacía, `POST /ingest*` exige el header `X-API-Key` | _(vacío)_ |
+| `API_KEY` | Clave de operación (scripts): header `X-API-Key` en escrituras | _(vacío)_ |
+| `AUTH_SECRET` | Secreto HS256 compartido con la PWA para el token `Authorization: Bearer` de editores. Sin `API_KEY` ni `AUTH_SECRET`, las escrituras quedan **abiertas** (modo dev, con aviso al arrancar) | _(vacío)_ |
+| `ADMIN_EMAILS` | Admins de arranque (coma), sin fila en `editores` | _(vacío)_ |
+| `TRUST_PROXY_HEADERS` | Usa `X-Forwarded-For` para el rate limit (activar en Render, detrás de proxy) | `false` |
+| `RATE_LIMIT_SEARCH_PER_MIN` / `RATE_LIMIT_WRITE_PER_MIN` | Límite por cliente (email del token o IP) | `120` / `20` |
+| `INGEST_ALLOWED_ROOTS` | Directorios absolutos (coma) permitidos para `POST /ingest`; vacío => deshabilitado (403) | _(vacío)_ |
 | `CORS_ORIGINS` | Orígenes permitidos, separados por coma | `http://localhost:3000,http://localhost:3010` |
 
 ## Ejecutar la API

@@ -17,7 +17,8 @@ from pymongo.errors import DuplicateKeyError
 
 from app.config import get_settings
 from app.db import jobs_collection
-from app.security import require_api_key
+from app.ratelimit import limit_write
+from app.security import require_editor
 from app.services import jobs
 from app.services import storage as storage_service
 from app.services.naming import slugify
@@ -74,11 +75,13 @@ def _presigned(job: dict, storage) -> dict:
     }
 
 
-@router.post("/uploads", status_code=201, dependencies=[Depends(require_api_key)])
-def create_upload(payload: SubidaRequest, response: Response) -> dict:
+@router.post("/uploads", status_code=201, dependencies=[Depends(limit_write)])
+def create_upload(payload: SubidaRequest, response: Response, editor: dict = Depends(require_editor)) -> dict:
     """Devuelve URLs PUT firmadas, o el trabajo/libro existente si el contenido ya se subió."""
     _validate(payload.archivos)
     storage = storage_service.get_storage()
+    if isinstance(storage, storage_service.LocalStorage):  # cannot presign: fail before creating a job
+        raise HTTPException(501, "Presigned uploads require the S3 backend (S3_ENDPOINT_URL).")
     digest = jobs.upload_digest([a.sha256 for a in payload.archivos])
     existing = jobs_collection().find_one({"sha256": digest})
 
@@ -91,7 +94,8 @@ def create_upload(payload: SubidaRequest, response: Response) -> dict:
             for i, a in enumerate(payload.archivos)
         ]
         try:
-            job_id = jobs.create_job(libro_id=libro_id, archivos=archivos, metadatos=payload.metadatos)
+            job_id = jobs.create_job(libro_id=libro_id, archivos=archivos, metadatos=payload.metadatos,
+                                     creado_por=editor["email"])
         except DuplicateKeyError:  # concurrent identical upload won the race
             existing = jobs_collection().find_one({"sha256": digest})
         else:
@@ -112,7 +116,7 @@ def create_upload(payload: SubidaRequest, response: Response) -> dict:
             "existente": True, "expira_en": None, "archivos": []}
 
 
-@router.post("/uploads/{upload_id}/completar", status_code=202, dependencies=[Depends(require_api_key)])
+@router.post("/uploads/{upload_id}/completar", status_code=202, dependencies=[Depends(limit_write), Depends(require_editor)])
 def complete_upload(upload_id: str) -> dict:
     """Verifica (HEAD) que cada objeto exista con el tamaño declarado y encola el trabajo."""
     job = jobs.get_job(upload_id)

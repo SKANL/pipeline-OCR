@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from app.ratelimit import limit_search
 from app.models import SearchResponse
 from app.services.search import search_pages
 
-router = APIRouter(tags=["search"])
+router = APIRouter(tags=["search"], dependencies=[Depends(limit_search)])
 
 
 @router.get("/search", response_model=SearchResponse)

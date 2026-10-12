@@ -4,10 +4,27 @@ Base: `/api/v1`. JSON. Todas las respuestas salvo error son objetos JSON.
 
 ## Autenticación
 
-- Los endpoints de **escritura** (`POST /ingest`, `POST /ingest/upload`, `POST /uploads*`) exigen el
-  header `X-API-Key` **solo si** `API_KEY` está configurada en el entorno. Si
-  `API_KEY` está vacía, quedan abiertos (modo demo).
 - Los endpoints de **lectura** son públicos.
+- Las **escrituras** aceptan una de dos credenciales:
+  - `Authorization: Bearer <jwt>` de un editor, emitido por el **servidor** de la PWA (nunca el
+    navegador): HS256 con `AUTH_SECRET`; claims `sub` = `email` (email de Google), `iat`, `exp`
+    (vigencia ≤ 10 min), `iss` = `"biblioteca-web"`, `aud` = `"biblioteca-api"`. Tolerancia de reloj 30 s.
+  - `X-API-Key` = `API_KEY` (scripts de operación; equivale a admin).
+- Roles: `ADMIN_EMAILS` (admins sin fila) o la colección `editores` `{email, rol: editor|admin, creado}`.
+  Emails sin distinguir mayúsculas.
+- `POST /ingest` (rutas del servidor) es solo para **admin u ops**, y además exige que la ruta real
+  (symlinks resueltos) quede dentro de `INGEST_ALLOWED_ROOTS`; sin raíces configuradas responde 403.
+- Sin `API_KEY` ni `AUTH_SECRET` las escrituras quedan abiertas (modo dev; aviso al arrancar).
+
+Errores: `401` sin credencial o token inválido/vencido · `403` cuenta sin rol suficiente o ruta no
+permitida · `429` límite de solicitudes superado (header `Retry-After` en segundos).
+
+## Límites de solicitudes
+
+Token bucket en memoria por cliente (email del token; si no, IP). `GET /search`:
+`RATE_LIMIT_SEARCH_PER_MIN` (120). Escrituras: `RATE_LIMIT_WRITE_PER_MIN` (20). `X-Forwarded-For`
+solo cuenta con `TRUST_PROXY_HEADERS=true` (activarlo en Render). Por instancia: con varias
+instancias, mover a Mongo/Redis.
 
 ## CORS
 
@@ -24,6 +41,13 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
 | `POST` | `/uploads` | Pide URLs PUT firmadas: `{ archivos: [{ nombre, tipo_contenido, tamano, sha256 }], metadatos? }`. |
 | `POST` | `/uploads/{id}/completar` | Verifica (HEAD) los objetos subidos y encola el trabajo (`202`). |
 | `GET` | `/trabajos/{id}` | Estado público del trabajo: `estado`, `progreso`, `error`, `libro_id` (al completar). |
+| `GET` | `/yo` | `{ email, rol }` del token Bearer (`rol` null si no es editor); 401 sin token. |
+| `GET` | `/editores` | Admin: lista `[{ email, rol, creado }]`. |
+| `POST` | `/editores` | Admin: alta/cambio `{ email, rol: "editor"|"admin" }` (`201`). |
+| `DELETE` | `/editores/{email}` | Admin: baja (`204`, idempotente). |
+| `PATCH` | `/books/{libro_id}` | Editor: edita `metadatos` (`titulo`, `subtitulo`, `autor`, `autor_normalizado`, `editorial`, `anio_publicacion`, `idioma`, `genero`, `tradicion`, `isbn`, `temas`, `descripcion`); campos desconocidos → 422. Actualiza también `pages`. |
+| `DELETE` | `/books/{libro_id}` | Editor: borra libro, páginas, trabajos + checkpoints y media `{libro_id}/` (`204`, idempotente). |
+| `POST` | `/books/{libro_id}/reprocesar` | Editor: reencola el trabajo desde los originales guardados con los metadatos actuales (`202 { trabajo_id, estado }`); `409` si hay uno activo o el libro no vino de la cola. |
 | `GET` | `/search` | Búsqueda full-text. Params: `q` (oblig.), `genero`, `autor`, `limit` (1–100), `offset`. |
 | `GET` | `/facets` | Facetas: `{ "generos": [{ "valor", "count" }], "autores": [...] }`. |
 | `GET` | `/books` | Lista de metadatos. Params: `genero`, `autor` (contiene, sin diacríticos), `limit`, `offset`. |

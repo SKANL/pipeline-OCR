@@ -17,6 +17,7 @@ dependencies = [
     "opendataloader-pdf>=2.0",
     "pypdfium2>=4.30",
     "boto3>=1.43.111",
+    "pyjwt>=2.15.1",
 ]
 
 [dependency-groups]
