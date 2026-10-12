@@ -213,21 +213,25 @@ def get_page_image(libro_id: str, numero: int) -> Response:
 # Editor management (PATCH / DELETE / reprocesar)
 # --------------------------------------------------------------------------
 class LibroPatch(BaseModel):
-    """Editable `metadatos` fields; unknown fields are rejected."""
+    """Editable `metadatos` fields; unknown fields are rejected.
+
+    Every field is optional (PATCH). `titulo`, `idioma` and `temas` may be
+    omitted but not set to null; `update_book` enforces that with a 422.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    titulo: str = Field(None, min_length=1, max_length=500)
+    titulo: Optional[str] = Field(None, min_length=1, max_length=500)
     subtitulo: Optional[str] = Field(None, max_length=500)
     autor: Optional[str] = Field(None, max_length=300)
     autor_normalizado: Optional[str] = Field(None, max_length=300)
     editorial: Optional[str] = Field(None, max_length=300)
     anio_publicacion: Optional[int] = Field(None, ge=0, le=3000)
-    idioma: str = Field(None, min_length=2, max_length=10)
+    idioma: Optional[str] = Field(None, min_length=2, max_length=10)
     genero: Optional[str] = Field(None, max_length=100)
     tradicion: Optional[str] = Field(None, max_length=100)
     isbn: Optional[str] = Field(None, max_length=20)
-    temas: list[str] = Field(None, max_length=50)
+    temas: Optional[list[str]] = Field(None, max_length=50)
     descripcion: Optional[str] = Field(None, max_length=5000)
 
 

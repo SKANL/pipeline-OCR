@@ -34,7 +34,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo import ReturnDocument
 
-from app.db import job_pages_collection, jobs_collection
+from app.db import books_collection, job_pages_collection, jobs_collection
 from app.services import ingest, pdf_classify, render
 from app.services import storage as storage_service
 from app.services.extract import FUENTE_PDF_ESCANEADO, FUENTE_TEXTO
@@ -264,6 +264,8 @@ def process(job: dict) -> int:
             result = _extract_page(kind, path, local, numero, job["libro_id"], storage)
             pagina = result["pages"][0]
             pagina["numero"] = numero
+            # Still ours (not deleted/stolen) before writing the checkpoint.
+            heartbeat(job, paginas_hechas=len(done), paginas_total=total)
             checkpoints.update_one(
                 {"trabajo_id": job["_id"], "numero": numero},
                 {"$set": {"pagina": pagina, "fuente": result["fuente"],
@@ -297,6 +299,14 @@ def process(job: dict) -> int:
     return total
 
 
+def _discard_deleted(job: dict) -> None:
+    """The book was deleted mid-job: drop checkpoints and media written since."""
+    logger.warning("Job %s was deleted while processing; discarding its output", job["_id"])
+    job_pages_collection().delete_many({"trabajo_id": job["_id"]})
+    if books_collection().find_one({"libro_id": job["libro_id"]}, {"_id": 1}) is None:
+        storage_service.get_storage().delete_prefix(f"{job['libro_id']}/")
+
+
 def run_once(worker_id: str) -> bool:
     """Claim and process one job. Returns False when there was nothing to do."""
     _sweep_exhausted()
@@ -306,7 +316,10 @@ def run_once(worker_id: str) -> bool:
     try:
         complete(job, paginas=process(job))
     except LeaseLost:
-        logger.warning("Lease lost for job %s; another worker continues it", job["_id"])
+        if jobs_collection().find_one({"_id": job["_id"]}, {"_id": 1}) is None:
+            _discard_deleted(job)
+        else:
+            logger.warning("Lease lost for job %s; another worker continues it", job["_id"])
     except Exception as exc:  # noqa: BLE001 - recorded on the job
         logger.exception("Job %s failed (attempt %s)", job["_id"], job["intentos"])
         fail(job, exc)
