@@ -1,0 +1,10 @@
+.venv
+_media
+.env
+.git
+.atl
+.playwright-cli
+odd
+tests/fixtures
+__pycache__
+*.pyc

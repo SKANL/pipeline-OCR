@@ -16,7 +16,14 @@ Biblioteca: http://localhost:3010/biblioteca.
 La PWA vive en el repo **hermano**: `..\biblioteca-eclesiastica-web`
 (`C:\code\biblioteca-eclesiastica-web`).
 
-## 1. MongoDB
+## 1. MongoDB (y S3 local)
+
+```powershell
+docker compose up -d   # Mongo :27017, S3 local SeaweedFS :9000 (sin autenticación, cualquier clave), bucket `biblioteca`
+docker compose down    # detener (los volúmenes se conservan)
+```
+
+Alternativa solo Mongo:
 
 ```powershell
 docker run -d --name biblio-mongo -p 27017:27017 mongo:8

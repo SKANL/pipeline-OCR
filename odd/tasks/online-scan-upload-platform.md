@@ -7,7 +7,7 @@ pipeline output quality is measured and improved.
 
 ## Decided constraints (user, 2026-10-11)
 - Stack: PWA on Vercel Hobby; API + pipeline + in-process worker on Render free (Docker);
-  MongoDB Atlas free; Cloudflare R2 (MinIO locally, same S3 code) with presigned URLs; Mistral OCR free.
+  MongoDB Atlas free; Cloudflare R2 (SeaweedFS locally, same S3 code) with presigned URLs; Mistral OCR free.
 - Render free: 512 MB RAM, 0.1 CPU, sleeps after 15 min idle, ephemeral disk, no workers
   -> Mongo job queue with lease, retries with backoff, per-page checkpoints, idempotency by sha256,
   opendataloader behind a flag.
@@ -19,7 +19,7 @@ pipeline output quality is measured and improved.
   idempotency, lease/visibility timeout, backoff, rate limiting, outbox-style job state).
 
 ## Workflow
-- TDD strict. Runners: `uv run pytest` (API, MONGODB_URI unreachable for unit runs; Mongo/MinIO via docker
+- TDD strict. Runners: `uv run pytest` (API, MONGODB_URI unreachable for unit runs; Mongo/SeaweedFS via docker
   for integration), `npm test` + `npm run lint` + `npx tsc --noEmit` (PWA).
 - Git: baseline on main (API 96a28f8, PWA 6adb9d0); work on `dev`, one commit per task, conventional commits,
   no AI attribution. Push/PR are the user's decision.
@@ -27,10 +27,11 @@ pipeline output quality is measured and improved.
 
 ## Tasks
 ### Infra
-- [ ] I1 Local docker compose (Mongo + MinIO), API Dockerfile (uv + Java) for Render, render.yaml, env docs.
+- [x] I1 Local docker compose (Mongo + SeaweedFS), API Dockerfile (uv + Java) for Render, render.yaml, env docs.
+  - Evidence: `docker compose config` OK, `docker build` OK (38s), pytest pass with MONGODB_URI=mongodb://127.0.0.1:1, render.yaml parses.
 
 ### API
-- [ ] A1 S3-compatible storage service (R2/MinIO) replacing local media writes; media served via public/presigned GET.
+- [ ] A1 S3-compatible storage service (R2/SeaweedFS) replacing local media writes; media served via public/presigned GET.
 - [ ] A2 Mongo job queue: lease/visibility timeout, attempts + exponential backoff, per-page checkpoints, sha256 idempotency, in-process worker.
 - [ ] A3 Upload flow: presigned PUT, complete -> job, `GET /jobs/{id}`.
 - [ ] A4 Auth: verify PWA-minted token, editors collection, protect writes (API key kept for ops scripts).
