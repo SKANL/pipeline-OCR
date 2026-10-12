@@ -8,6 +8,7 @@ S3-compatible (Cloudflare R2 / SeaweedFS) cuando hay `S3_ENDPOINT_URL` y
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import re
 import tempfile
@@ -21,6 +22,8 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _URL_PREFIX = "/media"
 _GET_EXPIRY = 3600  # ponytail: 1 h presigned GET; set S3_PUBLIC_BASE_URL to avoid expiry
@@ -169,7 +172,11 @@ class S3Storage(Storage):
         for page in pages:
             doomed = [{"Key": o["Key"]} for o in page.get("Contents", []) if o["Key"] not in keep]
             if doomed:
-                self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": doomed})
+                result = self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": doomed})
+                for error in result.get("Errors", []):
+                    # ponytail: logged, not raised; a leftover object only wastes space.
+                    logger.error("S3 delete failed for %s: %s %s", error.get("Key"),
+                                 error.get("Code"), error.get("Message"))
 
     def url(self, key: str) -> str:
         if self.public_base_url:
