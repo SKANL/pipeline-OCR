@@ -1,0 +1,20 @@
+{
+ "filas": [
+  {
+   "item": "astete-1700-foto",
+   "modo": "ocr",
+   "error": "Error de OCR (imagen): API error occurred: Status 429. Body: {\"object\":\"error\",\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"param\":null,\"code\":\"1300\","
+  },
+  {
+   "item": "sint-foto-movil",
+   "modo": "geometria",
+   "sesgo_residual": 0.0,
+   "orientacion_ok": true,
+   "tamano": [
+    523,
+    700
+   ]
+  }
+ ],
+ "ocr_llamadas_en_vivo": {}
+}

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,7 +31,7 @@ from app.config import get_settings
 from app.db import books_collection, pages_collection
 from app.models import Capitulo, Libro, Metadatos, OcrInfo, Pagina, Procedencia
 from app.services import ocr as ocr_service
-from app.services import pdf_classify, render, structure
+from app.services import pdf_classify, render, scan, structure
 from app.services.extract import (
     FUENTE_IMAGENES,
     FUENTE_PDF_DIGITAL,
@@ -748,16 +749,30 @@ def _extract_image_source(
     storage: Storage,
     first_page: int = 1,
 ) -> dict:
-    """Guarda la imagen de cada página y rutea el conjunto a OCR."""
+    """Guarda la imagen de cada página y rutea el conjunto a OCR.
+
+    Con `scan_preprocess` (por defecto) cada imagen se endereza y limpia
+    (`services/scan.py`); esa versión es la que va al OCR y la que se guarda
+    como imagen de página. El original queda intacto en el almacenamiento.
+    """
     urls: list[str | None] = []
     sizes: list[tuple[int, int] | None] = []
-    for index, source in enumerate(sources, start=first_page):
-        png = _page_png_bytes(source.data, source.suffix)
-        relative = storage.save_page_image(libro_id, index, png)
-        urls.append(relative)
-        sizes.append(_png_size(png))
+    preprocess = get_settings().scan_preprocess
+    with tempfile.TemporaryDirectory() as tmp:
+        ocr_paths: list[Path] = []
+        for index, source in enumerate(sources, start=first_page):
+            if preprocess:
+                png = scan.preprocess_image(source.data)
+                path = Path(tmp) / f"pagina-{index}.png"
+                path.write_bytes(png)
+            else:
+                png, path = _page_png_bytes(source.data, source.suffix), source.path
+            ocr_paths.append(path)
+            relative = storage.save_page_image(libro_id, index, png)
+            urls.append(relative)
+            sizes.append(_png_size(png))
 
-    result = extract_from_images([source.path for source in sources])
+        result = extract_from_images(ocr_paths)
     pages = _pages_from_extraction(_pages_from_result(result, urls), capitulos)
     for page, size in zip(pages, sizes):
         if size:
