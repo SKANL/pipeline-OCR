@@ -38,7 +38,8 @@ pipeline output quality is measured and improved.
 - [ ] A4 Auth: verify PWA-minted token, editors collection, protect writes (API key kept for ops scripts).
 - [ ] A5 Book management: PATCH/DELETE book, reprocess.
 - [ ] A6 Rate limiting, upload limits, `/ingest` allowed-root restriction.
-- [ ] A7 Escape search snippet HTML at the source (security review finding).
+- [x] A7 Escape search snippet HTML at the source (security review finding).
+  - Evidence: RED 2 snippet escape tests failing -> GREEN; pytest 110 passed 9 skipped (Mongo off), 119 passed with local Mongo test DB. PWA snippetToSafeHtml re-escapes -> visible &amp;lt; / &amp;amp; until a PWA task decodes-or-trusts the API snippet.
 
 ### Pipeline quality
 - [ ] P1 Corpus: 5 real public-domain + 5 synthetic files with ground truth; CER/WER evaluation harness and baseline report.

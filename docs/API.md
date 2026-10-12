@@ -34,7 +34,7 @@ defecto `http://localhost:3000,http://localhost:3010`). Necesario para que la PW
 
 - **`/search`** → `{ total, resultados: [ { libro_id, titulo, autor, ref, numero,
   capitulo_numero, snippet, score, imagen_url, bbox, bloque_idx, bbox_norm } ] }`.
-  `snippet` contiene `<mark>` alrededor de los términos; `bloque_idx`/`bbox_norm`
+  `snippet` es HTML seguro: texto escapado (`html.escape`) y `<mark>` alrededor de los términos; `bloque_idx`/`bbox_norm`
   conservan la localización aproximada anterior. `coincidencias` añade hasta
   8 coincidencias por resultado; el lector recalcula la lista con `/ref?q=`.
 - **`/ingest`** → `{ books, pages, books_processed, errors, fuentes }` donde

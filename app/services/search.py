@@ -7,6 +7,8 @@ primer match, resaltado con `<mark>`).
 
 from __future__ import annotations
 
+from html import escape
+
 from app.db import pages_collection
 from app.models import SearchHit
 from app.services.storage import media_url
@@ -22,7 +24,7 @@ def _query_terms(query: str) -> list[str]:
 
 
 def make_snippet(texto: str, query: str, window: int = SNIPPET_WINDOW) -> str:
-    """Snippet con TODAS las apariciones de los términos envueltas en `<mark>`.
+    """Snippet HTML: texto escapado y TODAS las apariciones envueltas en `<mark>`.
 
     El match es insensible a mayúsculas y a diacríticos: buscar
     "justificacion" resalta "justificación".
@@ -30,7 +32,7 @@ def make_snippet(texto: str, query: str, window: int = SNIPPET_WINDOW) -> str:
     texto = texto or ""
     ranges, _ = match_ranges(texto, query)
     if not ranges:
-        return texto[:window]
+        return escape(texto[:window])
     first = ranges[0][0]
     start = max(0, first - window // 2)
     end = min(len(texto), start + window)
@@ -40,9 +42,9 @@ def make_snippet(texto: str, query: str, window: int = SNIPPET_WINDOW) -> str:
         left, right = max(left, start), min(right, end)
         if left >= right:
             continue
-        parts.extend([texto[cursor:left], "<mark>", texto[left:right], "</mark>"])
+        parts.extend([escape(texto[cursor:left]), "<mark>", escape(texto[left:right]), "</mark>"])
         cursor = right
-    parts.append(texto[cursor:end])
+    parts.append(escape(texto[cursor:end]))
 
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(texto) else ""
