@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.security import require_api_key
+from app.security import require_admin
 from app.services.ingest import ingest_root
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -17,9 +17,9 @@ class IngestRequest(BaseModel):
     root: str
 
 
-@router.post("", dependencies=[Depends(require_api_key)])
+@router.post("", dependencies=[Depends(require_admin)])
 def ingest(payload: IngestRequest) -> dict:
-    """Ingesta un directorio raíz y devuelve el resumen."""
+    """Ingesta un directorio raíz del servidor (solo admin u ops `X-API-Key`)."""
     try:
         return ingest_root(payload.root)
     except FileNotFoundError as exc:

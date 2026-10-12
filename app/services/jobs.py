@@ -81,7 +81,7 @@ def upload_digest(sha256s: list[str]) -> str:
 
 
 def create_job(*, libro_id: str, archivos: list[dict], metadatos: dict | None,
-               estado: str = "esperando_subida") -> str:
+               estado: str = "esperando_subida", creado_por: str | None = None) -> str:
     """Insert a job; `archivos` carry nombre/tipo_contenido/tamano/sha256/clave."""
     now = _now()
     result = jobs_collection().insert_one({
@@ -98,6 +98,7 @@ def create_job(*, libro_id: str, archivos: list[dict], metadatos: dict | None,
         "worker_id": None,
         "progreso": {"paginas_hechas": 0, "paginas_total": None},
         "error": None,
+        "creado_por": creado_por,
         "creado_en": now,
         "actualizado_en": now,
     })
@@ -281,6 +282,8 @@ def process(job: dict) -> int:
         confianza_media=ingest._average([p["ocr_confianza"] for p in pages if p.get("ocr_confianza") is not None]),
         origen=[a["nombre"] for a in archivos],
     )
+    if job.get("creado_por"):
+        libro["creado_por"] = job["creado_por"]
     ingest._persist(libro, storage, originals=[a["clave"] for a in archivos])
     checkpoints.delete_many({"trabajo_id": job["_id"]})
     return total

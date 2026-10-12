@@ -49,6 +49,11 @@ def job_pages_collection() -> Collection:
     return get_db()["trabajo_paginas"]
 
 
+def editors_collection() -> Collection:
+    """Colección `editores`: `{email, rol: editor|admin, creado}`."""
+    return get_db()["editores"]
+
+
 def ensure_indexes() -> list[str]:
     """Crea los índices requeridos y devuelve sus nombres.
 
@@ -91,4 +96,5 @@ def ensure_indexes() -> list[str]:
                                    partialFilterExpression={"estado": "esperando_subida"}))
     names.append(job_pages_collection().create_index(
         [("trabajo_id", ASCENDING), ("numero", ASCENDING)], unique=True, name="uq_trabajo_paginas"))
+    names.append(editors_collection().create_index("email", unique=True, name="uq_editores_email"))
     return names

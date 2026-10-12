@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     worker_enabled: bool = True  # worker de la cola en el mismo proceso
     page_image_dpi: int = 150  # resolución del render PDF -> PNG
     api_key: str = ""  # si está vacía, los endpoints de escritura no exigen auth (dev)
+    auth_secret: str = ""  # HS256 secret shared with the PWA (bearer tokens); empty => no bearer auth
+    admin_emails: str = ""  # bootstrap admins, comma separated (no DB row needed)
     cors_origins: str = "http://localhost:3000,http://localhost:3010"  # orígenes permitidos, separados por coma
 
 
